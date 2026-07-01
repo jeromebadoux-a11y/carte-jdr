@@ -43,6 +43,8 @@ button, input, select, textarea{ font-family: inherit; color: inherit; }
 .campaigns-actions{ display:flex; gap:12px; flex-wrap:wrap; margin:20px 0 28px; }
 .campaigns-list{ display:flex; flex-direction:column; gap:10px; }
 .empty-hint{ color:var(--text-dim); font-style:italic; }
+.btn-check-updates{ margin-bottom:6px; }
+.update-status{ color:var(--text-dim); font-size:.85rem; margin:0 0 20px; min-height:1.2em; }
 
 .campaign-card{
   display:flex; align-items:center; justify-content:space-between;

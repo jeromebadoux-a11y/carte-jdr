@@ -30,6 +30,7 @@ async function init() {
   grabEls();
   registerServiceWorker();
   wireCampaignScreen();
+  wireUpdateCheck();
   wireTopbar();
   wireZoomControls();
   await refreshCampaignScreen();
@@ -177,10 +178,13 @@ function wireZoomControls() {
 }
 
 // ============ service worker (mise en cache hors ligne) ============
+let swRegistration = null;
+
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("service-worker.js").then((reg) => {
+      swRegistration = reg;
       // vérifie régulièrement s'il existe une nouvelle version de l'app en cache
       reg.update().catch(() => {});
       setInterval(() => reg.update().catch(() => {}), 60 * 1000);
@@ -196,6 +200,52 @@ function registerServiceWorker() {
       window.location.reload();
     });
   });
+}
+
+// ============ vérification manuelle des mises à jour ============
+// Bouton pensé pour lever tout doute sur "ai-je bien la dernière version installée ?" sans
+// devoir passer par un nettoyage complet des données du site : force une vérification active
+// auprès du serveur (au lieu d'attendre le contrôle périodique automatique toutes les 60s),
+// puis recharge la page. Grâce à la stratégie réseau "no-store" du service worker, ce
+// rechargement va bien rechercher chaque fichier sur le serveur plutôt que de se contenter
+// d'une copie mise en cache par le navigateur lui-même.
+function wireUpdateCheck() {
+  const btn = document.getElementById("btn-check-updates");
+  const statusEl = document.getElementById("update-status");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    if (!("serviceWorker" in navigator)) {
+      setStatus("Ce navigateur ne supporte pas la mise à jour automatique de l'app.");
+      return;
+    }
+    if (navigator.onLine === false) {
+      setStatus("Pas de connexion détectée — branche-toi au réseau puis réessaie.");
+      return;
+    }
+    btn.disabled = true;
+    setStatus("Vérification en cours…");
+    try {
+      let reg = swRegistration || await navigator.serviceWorker.getRegistration();
+      if (!reg) {
+        setStatus("Aucune installation détectée — rechargement…");
+        window.location.reload();
+        return;
+      }
+      await reg.update();
+      // laisse une courte fenêtre pour qu'une éventuelle nouvelle version s'installe/active
+      // (ce qui déclenchera "controllerchange" et un rechargement automatique de son côté) ;
+      // dans tous les cas, on force ensuite un rechargement — avec la politique "no-store" du
+      // service worker, ce rechargement seul suffit déjà à garantir des fichiers à jour.
+      setStatus("Mise à jour vérifiée — rechargement de l'app…");
+      setTimeout(() => window.location.reload(), 700);
+    } catch (e) {
+      console.error(e);
+      setStatus("Échec de la vérification (" + e.message + ") — réessaie plus tard.");
+      btn.disabled = false;
+    }
+  });
+
+  function setStatus(msg) { if (statusEl) statusEl.textContent = msg; }
 }
 
 // sauvegarde avant fermeture / mise en arrière-plan

@@ -22,7 +22,48 @@ import { toast } from "./ui-common.js";
 // pour identifier une éventuelle panne silencieuse sur un appareil donné. Peut être désactivé
 // une fois le bon fonctionnement confirmé sur le terrain (mettre DIAG_TOASTS à false).
 const DIAG_TOASTS = true;
-function diag(msg) { if (DIAG_TOASTS) toast("🔍 " + msg, 3000); }
+const DIAG_BUILD_TAG = "detail-diag-v4";
+
+// Bandeau PERMANENT (ne disparaît jamais tout seul, contrairement à un toast) pour ne plus
+// jamais rater un message par manque de timing — il affiche en continu les derniers messages
+// de diagnostic, consultable à tout moment en regardant simplement l'écran.
+let diagBanner = null;
+const diagLines = [];
+function ensureDiagBanner() {
+  if (diagBanner || !document.body) return diagBanner;
+  diagBanner = document.createElement("div");
+  diagBanner.id = "diag-banner";
+  diagBanner.style.cssText = [
+    "position:fixed", "left:6px", "bottom:6px", "z-index:99999",
+    "max-width:92vw", "background:rgba(0,0,0,0.82)", "color:#7CFC9A",
+    "font:11px/1.4 monospace", "padding:6px 8px", "border-radius:6px",
+    "white-space:pre-wrap", "pointer-events:none", "box-shadow:0 2px 8px rgba(0,0,0,0.4)",
+  ].join(";");
+  document.body.appendChild(diagBanner);
+  return diagBanner;
+}
+function diag(msg) {
+  if (!DIAG_TOASTS) return;
+  toast("🔍 " + msg, 3500);
+  const b = ensureDiagBanner();
+  if (!b) return;
+  diagLines.push(msg);
+  if (diagLines.length > 6) diagLines.shift();
+  b.textContent = "🔍 " + DIAG_BUILD_TAG + "\n" + diagLines.join("\n");
+}
+
+// Marqueur INCONDITIONNEL affiché dès que ce fichier est chargé par le navigateur — sans
+// attendre le moindre zoom/recadrage, et qui RESTE affiché (pas juste un toast fugace). Sert
+// uniquement à vérifier, de façon certaine, que cette version du code tourne bien sur
+// l'appareil (et pas une version mise en cache plus ancienne).
+if (DIAG_TOASTS) {
+  const showBuildMarker = () => diag(`build « ${DIAG_BUILD_TAG} » chargé ✔ (${new Date().toISOString().slice(11, 19)})`);
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", showBuildMarker);
+  } else {
+    showBuildMarker();
+  }
+}
 
 const ENGAGE_ZOOM = 1.3;     // au-delà, la vue d'ensemble serait agrandie de +30% : on charge du détail
 const DISENGAGE_ZOOM = 1.05; // en dessous, on relâche le détail (hystérésis pour éviter les allers-retours)
@@ -91,6 +132,40 @@ function rectContains(outer, x, y, w, h) {
     (x + w) <= outer.x + outer.w + eps && (y + h) <= outer.y + outer.h + eps;
 }
 
+// Ajoute une marge autour du rectangle strictement visible (pour ne pas devoir recharger au
+// moindre petit pan) — MAIS seulement dans la mesure où il reste de la place sous le plafond
+// de texture sûr pour l'appareil. Sans ça, à fort zoom, la marge fixe (MARGIN_FACTOR) pouvait
+// gonfler la zone demandée au point de dépasser la taille sûre, forçant un downscale qui rendait
+// la vignette moins nette que la zone réellement visible ne l'aurait permis — d'où le constat
+// "moins net qu'en zoomant pareil sur l'image d'origine directement". On donne donc la priorité
+// à la netteté de ce qui est réellement à l'écran, quitte à recharger plus souvent en pannant.
+export function computeAdaptivePaddedRect(visible, campaign, safeDim = getMaxSafeTextureSize()) {
+  const mapW = campaign.mapWidth, mapH = campaign.mapHeight;
+  const origW = campaign.mapOriginalWidth || mapW, origH = campaign.mapOriginalHeight || mapH;
+  const desiredFactor = 1 + 2 * MARGIN_FACTOR;
+  if (!mapW || !mapH || !origW || !origH) {
+    // pas assez d'info pour calculer le budget pixel : on retombe sur la marge fixe habituelle
+    return padRect(visible, desiredFactor);
+  }
+  const scaleX = origW / mapW, scaleY = origH / mapH;
+  const coreOw = visible.w * scaleX, coreOh = visible.h * scaleY;
+  const largestCore = Math.max(coreOw, coreOh);
+  // facteur maximal d'agrandissement encore possible sans dépasser le plafond GPU sûr
+  const maxFactor = largestCore > 0 ? safeDim / largestCore : desiredFactor;
+  const actualFactor = Math.max(1, Math.min(desiredFactor, maxFactor));
+  return padRect(visible, actualFactor);
+}
+
+function padRect(visible, factor) {
+  const extra = (factor - 1) / 2;
+  return {
+    x: visible.x - visible.w * extra,
+    y: visible.y - visible.h * extra,
+    w: visible.w * factor,
+    h: visible.h * factor,
+  };
+}
+
 async function evaluateDetailNeed() {
   const c = App.campaign;
   if (!c || !c.originalImageBlob || !App.mapImage) {
@@ -123,12 +198,7 @@ async function evaluateDetailNeed() {
   if (evaluating) return;
   evaluating = true;
 
-  const padded = {
-    x: visible.x - visible.w * MARGIN_FACTOR,
-    y: visible.y - visible.h * MARGIN_FACTOR,
-    w: visible.w * (1 + 2 * MARGIN_FACTOR),
-    h: visible.h * (1 + 2 * MARGIN_FACTOR),
-  };
+  const padded = computeAdaptivePaddedRect(visible, c);
 
   diag(`Détail : chargement (zoom ${App.view.zoom.toFixed(2)})…`);
   const myGen = ++requestGen;
