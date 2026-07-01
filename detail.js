@@ -15,18 +15,47 @@
 // (pixels par unité de carte) est bien plus fine que celle de la vue d'ensemble.
 import { App } from "./state.js";
 import { getMaxSafeTextureSize } from "./mapload.js";
+import { toast } from "./ui-common.js";
+
+// Diagnostic temporaire et visible à l'écran (pas seulement dans la console, inaccessible sur
+// tablette) : montre ce que fait réellement le système de détail pendant qu'on zoome/recadre,
+// pour identifier une éventuelle panne silencieuse sur un appareil donné. Peut être désactivé
+// une fois le bon fonctionnement confirmé sur le terrain (mettre DIAG_TOASTS à false).
+const DIAG_TOASTS = true;
+function diag(msg) { if (DIAG_TOASTS) toast("🔍 " + msg, 3000); }
 
 const ENGAGE_ZOOM = 1.3;     // au-delà, la vue d'ensemble serait agrandie de +30% : on charge du détail
 const DISENGAGE_ZOOM = 1.05; // en dessous, on relâche le détail (hystérésis pour éviter les allers-retours)
 const MARGIN_FACTOR = 0.4;   // marge autour du viewport visible, en fraction de sa taille (pan sans recharger)
-const DEBOUNCE_MS = 200;     // attend que le geste (pincement/pan) se stabilise avant de décoder
+const THROTTLE_MS = 250;     // fréquence max de vérification pendant un geste en cours
 
-let debounceTimer = null;
+// Important : ceci est un THROTTLE (exécution périodique garantie), PAS un debounce.
+// Un debounce classique (retarder tant que des évènements arrivent, n'exécuter qu'au silence)
+// ne fonctionne pas ici : pendant un pincement à deux doigts réellement tenu sur un écran
+// tactile, de minuscules micro-tremblements génèrent un flux quasi continu de pointermove —
+// un debounce ne verrait donc JAMAIS 200ms de silence tant que les doigts restent posés, et la
+// vignette haute résolution ne se chargerait qu'après avoir complètement relâché les doigts
+// (et parfois même pas, selon l'enchaînement des évènements). Avec un throttle, la vérification
+// s'exécute au moins une fois toutes les THROTTLE_MS, y compris PENDANT le geste — la carte
+// s'affine donc progressivement au fur et à mesure qu'on zoome, sans attendre la fin du geste.
+let throttleTimer = null;
+let lastRunAt = 0;
+let evaluating = false; // évite d'empiler plusieurs décodages concurrents (coûteux) si un est déjà en cours
 let requestGen = 0;
 
 export function scheduleDetailUpdate() {
-  if (debounceTimer) clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(evaluateDetailNeed, DEBOUNCE_MS);
+  const now = Date.now();
+  const elapsed = now - lastRunAt;
+  if (elapsed >= THROTTLE_MS) {
+    lastRunAt = now;
+    evaluateDetailNeed();
+  } else if (!throttleTimer) {
+    throttleTimer = setTimeout(() => {
+      throttleTimer = null;
+      lastRunAt = Date.now();
+      evaluateDetailNeed();
+    }, THROTTLE_MS - elapsed);
+  }
 }
 
 // À appeler quand la carte/l'original change (nouvel import, changement de partie) pour ne
@@ -34,7 +63,8 @@ export function scheduleDetailUpdate() {
 // plus tard et écraser l'état courant.
 export function resetDetailState() {
   requestGen++;
-  if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
+  if (throttleTimer) { clearTimeout(throttleTimer); throttleTimer = null; }
+  lastRunAt = 0;
   releaseDetailImage(App.detail);
   App.detail = null;
 }
@@ -64,12 +94,16 @@ function rectContains(outer, x, y, w, h) {
 async function evaluateDetailNeed() {
   const c = App.campaign;
   if (!c || !c.originalImageBlob || !App.mapImage) {
-    if (App.detail) { releaseDetailImage(App.detail); App.detail = null; }
+    if (App.detail) { requestGen++; releaseDetailImage(App.detail); App.detail = null; }
     return;
   }
 
   if (App.view.zoom < DISENGAGE_ZOOM) {
     if (App.detail) {
+      // annule aussi tout décodage encore en vol (ex : l'utilisateur a dézoomé pendant qu'une
+      // vignette pour un zoom précédent finissait de se charger) pour qu'il ne vienne pas
+      // réafficher une vignette périmée une fois résolu.
+      requestGen++;
       releaseDetailImage(App.detail);
       App.detail = null;
       requestRender();
@@ -83,6 +117,12 @@ async function evaluateDetailNeed() {
     return; // la vignette actuelle couvre déjà largement ce qui est affiché
   }
 
+  // un décodage est déjà en cours (probable pendant un geste tenu, avec le throttle qui
+  // retente toutes les THROTTLE_MS) : on ne relance pas par-dessus, la prochaine passe du
+  // throttle réévaluera la situation une fois celui-ci terminé.
+  if (evaluating) return;
+  evaluating = true;
+
   const padded = {
     x: visible.x - visible.w * MARGIN_FACTOR,
     y: visible.y - visible.h * MARGIN_FACTOR,
@@ -90,27 +130,44 @@ async function evaluateDetailNeed() {
     h: visible.h * (1 + 2 * MARGIN_FACTOR),
   };
 
+  diag(`Détail : chargement (zoom ${App.view.zoom.toFixed(2)})…`);
   const myGen = ++requestGen;
-  const loaded = await loadDetailPatch(padded, c);
-  if (!loaded || myGen !== requestGen) {
-    // requête périmée (une région/carte a changé entre-temps) ou échec : on jette silencieusement
-    if (loaded) releaseDetailImage(loaded);
-    return;
+  try {
+    const loaded = await loadDetailPatch(padded, c);
+    if (!loaded || myGen !== requestGen) {
+      // requête périmée (une région/carte a changé entre-temps) ou échec : on jette silencieusement
+      if (loaded) releaseDetailImage(loaded);
+      return;
+    }
+    diag(`Détail : chargé (${loaded.image.width}×${loaded.image.height}px)`);
+    releaseDetailImage(App.detail);
+    App.detail = loaded;
+    requestRender();
+  } finally {
+    evaluating = false;
   }
-  releaseDetailImage(App.detail);
-  App.detail = loaded;
-  requestRender();
 }
 
 async function loadDetailPatch(worldRect, campaign) {
+  if (typeof createImageBitmap !== "function") {
+    diag("Détail : indisponible — ce navigateur ne supporte pas le découpage d'image nécessaire");
+    return null;
+  }
+
   const mapW = campaign.mapWidth, mapH = campaign.mapHeight;
   const origW = campaign.mapOriginalWidth || mapW, origH = campaign.mapOriginalHeight || mapH;
-  if (!mapW || !mapH || !origW || !origH) return null;
+  if (!mapW || !mapH || !origW || !origH) {
+    diag("Détail : dimensions de carte manquantes, impossible de calculer la zone à découper");
+    return null;
+  }
 
   const scaleX = origW / mapW, scaleY = origH / mapH;
   // Si la vue d'ensemble est déjà à la résolution d'origine (pas de perte à l'import), une
   // vignette "détail" n'apporterait rien de plus net : on ne décode pas pour rien.
-  if (scaleX <= 1.001 && scaleY <= 1.001) return null;
+  if (scaleX <= 1.001 && scaleY <= 1.001) {
+    diag("Détail : inutile ici, la vue d'ensemble est déjà à la résolution d'origine");
+    return null;
+  }
 
   let ox = worldRect.x * scaleX, oy = worldRect.y * scaleY;
   let ow = worldRect.w * scaleX, oh = worldRect.h * scaleY;
@@ -119,13 +176,17 @@ async function loadDetailPatch(worldRect, campaign) {
   ox = Math.max(0, ox); oy = Math.max(0, oy);
   ow = Math.max(1, Math.round(ex - ox)); oh = Math.max(1, Math.round(ey - oy));
   ox = Math.round(ox); oy = Math.round(oy);
-  if (ow < 1 || oh < 1) return null;
+  if (ow < 1 || oh < 1) {
+    diag("Détail : zone calculée vide (0px), abandon");
+    return null;
+  }
 
   let bitmap;
   try {
     bitmap = await createImageBitmap(campaign.originalImageBlob, ox, oy, ow, oh);
   } catch (e) {
     console.warn("Découpe haute résolution impossible :", e);
+    diag("Détail : échec du découpage — " + (e && e.message ? e.message : String(e)));
     return null;
   }
 
