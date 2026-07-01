@@ -1,12 +1,13 @@
 // mapview.js — rendu de la carte (image + brouillard) et gestion des gestes
 // (pan / zoom / pincement, pinceau de brouillard, outil de recadrage régional).
 import { App, worldToScreen, screenToWorld, clampView, markDirty, resetViewToBounds } from "./state.js";
-import { brushStroke, onFogChanged } from "./fog.js";
+import { brushStroke, onFogChanged, getFogPattern } from "./fog.js";
 import { refreshSymbolVisibility, placeSymbolAt, renderSymbols } from "./symbols.js";
 import { refreshLabelVisibility, placeLabelAt, renderLabels } from "./labels.js";
 import { updateScaleBar } from "./scalebar.js";
 
 let canvas, ctx, viewport, cropOverlay;
+let fogScratch, fogScratchCtx; // buffer intermédiaire pour recolorer le masque de brouillard avec la texture nuageuse
 const pointers = new Map(); // pointerId -> {x,y}
 let pinch = null;           // {startDist, startZoom, startCx, startCy, midWorld}
 let brushing = null;        // {last: worldPoint}
@@ -37,6 +38,13 @@ function resizeCanvas() {
   canvas.height = Math.max(1, Math.round(h * dpr));
   canvas.style.width = w + "px";
   canvas.style.height = h + "px";
+
+  if (!fogScratch) {
+    fogScratch = document.createElement("canvas");
+    fogScratchCtx = fogScratch.getContext("2d");
+  }
+  fogScratch.width = Math.max(1, w);
+  fogScratch.height = Math.max(1, h);
 }
 
 export function render() {
@@ -58,9 +66,35 @@ export function render() {
   ctx.imageSmoothingEnabled = true;
   safeDrawImage(ctx, App.mapImage, sx, sy, sw, sh, 0, 0, w, h);
 
-  if (App.fogCanvas) {
+  if (App.fogCanvas && fogScratch) {
     const fs = App.campaign.fogScale;
-    safeDrawImage(ctx, App.fogCanvas, sx * fs, sy * fs, sw * fs, sh * fs, 0, 0, w, h);
+    const fw = fogScratch.width, fh = fogScratch.height;
+
+    // 1) reconstitue la forme du brouillard (masque alpha) telle que vue dans le viewport
+    fogScratchCtx.setTransform(1, 0, 0, 1, 0, 0);
+    fogScratchCtx.clearRect(0, 0, fw, fh);
+    fogScratchCtx.globalCompositeOperation = "source-over";
+    safeDrawImage(fogScratchCtx, App.fogCanvas, sx * fs, sy * fs, sw * fs, sh * fs, 0, 0, fw, fh);
+
+    // 2) recolore uniquement cette forme avec une texture "nuageuse", ancrée aux coordonnées
+    //    de la carte (donc fixe par rapport à la carte quand on déplace/zoome la vue).
+    fogScratchCtx.save();
+    fogScratchCtx.globalCompositeOperation = "source-in";
+    const pattern = getFogPattern();
+    const origin = worldToScreen(0, 0);
+    if (pattern.setTransform) {
+      pattern.setTransform(new DOMMatrix().translate(origin.x, origin.y).scale(App.view.zoom, App.view.zoom));
+    }
+    fogScratchCtx.fillStyle = pattern;
+    fogScratchCtx.fillRect(0, 0, fw, fh);
+    fogScratchCtx.restore();
+
+    // En Mode MJ, le brouillard est semi-transparent : le MJ voit toujours la carte
+    // en dessous pour s'orienter. En Mode Jeu, il est totalement opaque pour les joueurs.
+    ctx.save();
+    ctx.globalAlpha = App.mode === "gm" ? 0.45 : 1;
+    ctx.drawImage(fogScratch, 0, 0, fw, fh, 0, 0, w, h);
+    ctx.restore();
   }
 
   updateCropOverlay();

@@ -137,3 +137,58 @@ export function fogOpacityAt(worldX, worldY) {
 export function onFogChanged() {
   persistFogToBlob().then(markDirty);
 }
+
+// ============ texture "nuageuse" du brouillard (purement visuelle) ============
+// Le masque de brouillard (App.fogCanvas) reste un simple canal alpha (opaque=caché,
+// transparent=révélé) : c'est lui qui sert de référence pour toute la logique (fogOpacityAt).
+// Cette texture sert uniquement à donner un aspect "nuage de brouillard" à l'affichage,
+// sans jamais changer l'opacité réelle : le fond est peint plein avant les tâches,
+// donc chaque pixel du tuile reste à alpha=255.
+let _fogPattern = null;
+
+export function getFogPattern() {
+  if (_fogPattern) return _fogPattern;
+  const size = 512;
+  const tile = document.createElement("canvas");
+  tile.width = size;
+  tile.height = size;
+  const tctx = tile.getContext("2d");
+
+  tctx.fillStyle = "#15171f";
+  tctx.fillRect(0, 0, size, size);
+
+  const colors = ["#262b38", "#343b4d", "#1b1d25", "#454c62", "#20222b", "#2f3444"];
+
+  function hexToRgba(hex, a) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+  }
+
+  function blob(cx, cy, r, color, alpha) {
+    const grad = tctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    grad.addColorStop(0, hexToRgba(color, alpha));
+    grad.addColorStop(1, hexToRgba(color, 0));
+    tctx.fillStyle = grad;
+    tctx.beginPath();
+    tctx.arc(cx, cy, r, 0, Math.PI * 2);
+    tctx.fill();
+  }
+
+  // chaque tache est aussi dessinée décalée d'une taille de tuile dans les 8 directions
+  // pour que le motif s'enchaîne sans coupure visible une fois répété (pattern "repeat").
+  const BLOB_COUNT = 60;
+  for (let i = 0; i < BLOB_COUNT; i++) {
+    const cx = Math.random() * size, cy = Math.random() * size;
+    const r = 35 + Math.random() * 120;
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    const alpha = 0.12 + Math.random() * 0.25;
+    for (const ox of [-size, 0, size]) {
+      for (const oy of [-size, 0, size]) {
+        blob(cx + ox, cy + oy, r, color, alpha);
+      }
+    }
+  }
+
+  _fogPattern = tctx.createPattern(tile, "repeat");
+  return _fogPattern;
+}

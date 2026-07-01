@@ -175,11 +175,24 @@ function wireZoomControls() {
 
 // ============ service worker (mise en cache hors ligne) ============
 function registerServiceWorker() {
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("service-worker.js").catch((e) => console.warn("SW non enregistré :", e));
+  if (!("serviceWorker" in navigator)) return;
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("service-worker.js").then((reg) => {
+      // vérifie régulièrement s'il existe une nouvelle version de l'app en cache
+      reg.update().catch(() => {});
+      setInterval(() => reg.update().catch(() => {}), 60 * 1000);
+    }).catch((e) => console.warn("SW non enregistré :", e));
+
+    // dès qu'une nouvelle version prend le contrôle, recharge une seule fois
+    // pour que la mise à jour s'applique immédiatement (sans quoi elle resterait
+    // en cache jusqu'à une fermeture complète manuelle de l'app).
+    let alreadyReloaded = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (alreadyReloaded) return;
+      alreadyReloaded = true;
+      window.location.reload();
     });
-  }
+  });
 }
 
 // sauvegarde avant fermeture / mise en arrière-plan
