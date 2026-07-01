@@ -5,7 +5,7 @@ import { brushStroke, onFogChanged, getFogPattern } from "./fog.js";
 import { refreshSymbolVisibility, placeSymbolAt, renderSymbols } from "./symbols.js";
 import { refreshLabelVisibility, placeLabelAt, renderLabels } from "./labels.js";
 import { updateScaleBar } from "./scalebar.js";
-import { scheduleDetailUpdate } from "./detail.js";
+import { scheduleDetailUpdate, diag } from "./detail.js";
 
 // dès qu'une vignette haute résolution finit de se charger en arrière-plan, on redessine
 // pour l'afficher (sans quoi il faudrait attendre un prochain pan/zoom pour la voir apparaître).
@@ -36,8 +36,21 @@ export function initMapView() {
   viewport.addEventListener("wheel", onWheel, { passive: false });
 }
 
+let lastDiagedRealDpr = null;
+
 function resizeCanvas() {
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  // Plafond relevé de 2 à 3 : sur un écran dont la vraie densité de pixels dépasse 2 (fréquent
+  // sur des tablettes récentes/haut de gamme), l'ancien plafond de 2 limitait la résolution du
+  // canvas lui-même — indépendamment de la netteté de la vignette détail chargée — ce qui
+  // pouvait donner une impression de flou même quand l'image source avait largement assez de
+  // détail. Un plafond reste nécessaire pour ne pas exploser la mémoire sur des valeurs
+  // aberrantes que certains appareils/réglages d'accessibilité peuvent parfois renvoyer.
+  const realDpr = window.devicePixelRatio || 1;
+  const dpr = Math.min(3, realDpr);
+  if (realDpr !== lastDiagedRealDpr) {
+    lastDiagedRealDpr = realDpr;
+    diag(`Écran : devicePixelRatio réel = ${realDpr}, utilisé pour le rendu = ${dpr}${realDpr > 3 ? " (plafonné)" : ""}`);
+  }
   const w = viewport.clientWidth, h = viewport.clientHeight;
   canvas.width = Math.max(1, Math.round(w * dpr));
   canvas.height = Math.max(1, Math.round(h * dpr));
