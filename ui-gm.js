@@ -20,6 +20,7 @@ export function initGmUI() {
   initBrouillardTab();
   initSymbolesTab();
   initLabelsTab();
+  initRegionsTab();
   initEchelleTab();
   initFichierTab();
 
@@ -115,11 +116,7 @@ function initCarteTab() {
   });
 
   document.getElementById("btn-crop-mode").addEventListener("click", () => {
-    if (!App.campaign?.mapWidth) { toast("Importe d'abord une carte."); return; }
-    startCropMode();
-    document.getElementById("btn-crop-mode").classList.add("hidden");
-    document.getElementById("btn-crop-confirm").classList.remove("hidden");
-    document.getElementById("btn-crop-cancel").classList.remove("hidden");
+    beginCropFromUI();
   });
   document.getElementById("btn-crop-confirm").addEventListener("click", async () => {
     const rect = getCropRect();
@@ -146,6 +143,27 @@ function resetCropButtons() {
   document.getElementById("btn-crop-mode").classList.remove("hidden");
   document.getElementById("btn-crop-confirm").classList.add("hidden");
   document.getElementById("btn-crop-cancel").classList.add("hidden");
+}
+
+// Point d'entrée unique pour démarrer le recadrage, utilisable depuis l'onglet Carte
+// ET depuis l'onglet Régions : bascule vers l'onglet Carte (où se trouvent les boutons
+// Valider/Annuler) puis active réellement le mode recadrage sur la carte.
+function beginCropFromUI() {
+  if (!App.campaign?.mapWidth) { toast("Importe d'abord une carte (onglet « Carte »)."); return; }
+  const carteTabBtn = document.querySelector('.gm-tab[data-tab="carte"]');
+  if (App.gmTab !== "carte") carteTabBtn.click();
+  startCropMode();
+  document.getElementById("btn-crop-mode").classList.add("hidden");
+  document.getElementById("btn-crop-confirm").classList.remove("hidden");
+  document.getElementById("btn-crop-cancel").classList.remove("hidden");
+}
+
+// ---------- Onglet Régions ----------
+function initRegionsTab() {
+  document.getElementById("btn-region-new-from-crop").addEventListener("click", () => {
+    beginCropFromUI();
+    toast("Dessine le rectangle sur la carte, puis valide en bas du panneau.");
+  });
 }
 
 function updateMapInfo() {
