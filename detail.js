@@ -22,7 +22,7 @@ import { toast } from "./ui-common.js";
 // pour identifier une éventuelle panne silencieuse sur un appareil donné. Peut être désactivé
 // une fois le bon fonctionnement confirmé sur le terrain (mettre DIAG_TOASTS à false).
 const DIAG_TOASTS = true;
-const DIAG_BUILD_TAG = "detail-diag-v7";
+const DIAG_BUILD_TAG = "detail-diag-v8";
 
 // Bandeau PERMANENT (ne disparaît jamais tout seul, contrairement à un toast) pour ne plus
 // jamais rater un message par manque de timing — il affiche en continu les derniers messages
@@ -209,15 +209,28 @@ async function evaluateDetailNeed() {
       if (loaded) releaseDetailImage(loaded);
       return;
     }
-    // Chiffres clés pour distinguer un vrai bug (on pourrait faire mieux) d'un plafond matériel
-    // incontournable (le "natif idéal" pour la zone visible dépasse déjà ce que le GPU accepte) :
-    // "natif idéal" = résolution qu'aurait la zone strictement visible à la résolution d'origine
-    // du fichier importé ; "plafond GPU" = limite sûre détectée pour cet appareil.
+    // Chiffres clés pour distinguer un vrai bug (on pourrait faire mieux) d'une limite qui ne
+    // vient ni de mon code ni du GPU, mais du fichier source lui-même :
+    // - "chargé" : ce qu'on affiche réellement.
+    // - "natif idéal" : pixels disponibles dans LE FICHIER D'ORIGINE pour la zone visible —
+    //   au-delà, il n'existe tout simplement pas plus de détail dans la photo/scan importé(e).
+    // - "besoin écran" : pixels que l'ÉCRAN de la tablette doit afficher pour cette même zone
+    //   (largeur du viewport × zoom × densité de pixels réelle de l'écran).
+    // - "plafond GPU" : limite sûre détectée pour cet appareil.
+    // Si "natif idéal" < "besoin écran", même le fichier original tel quel n'a pas assez de
+    // détail pour remplir l'écran à ce niveau de zoom — c'est une limite de la photo/scan
+    // elle-même, pas quelque chose de corrigeable par l'app (il faudrait un fichier source plus
+    // détaillé). Si "natif idéal" ≥ "besoin écran" mais que ça reste flou à l'écran, alors il y a
+    // effectivement encore un bug de rendu à trouver.
     const origW = c.mapOriginalWidth || c.mapWidth, origH = c.mapOriginalHeight || c.mapHeight;
     const scaleX = origW / c.mapWidth, scaleY = origH / c.mapHeight;
     const idealW = Math.round(visible.w * scaleX), idealH = Math.round(visible.h * scaleY);
     const safeDim = getMaxSafeTextureSize();
-    diag(`Détail : chargé ${loaded.image.width}×${loaded.image.height}px (natif idéal pour l'écran : ${idealW}×${idealH}px, plafond GPU : ${safeDim}px)`);
+    const realDpr = window.devicePixelRatio || 1;
+    const vp = App.els.viewport;
+    const screenNeedW = Math.round((vp?.clientWidth || 0) * realDpr);
+    const screenNeedH = Math.round((vp?.clientHeight || 0) * realDpr);
+    diag(`Détail : chargé ${loaded.image.width}×${loaded.image.height}px | natif idéal ${idealW}×${idealH}px | besoin écran ${screenNeedW}×${screenNeedH}px | plafond GPU ${safeDim}px`);
     releaseDetailImage(App.detail);
     App.detail = loaded;
     requestRender();
