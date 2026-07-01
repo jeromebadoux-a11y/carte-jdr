@@ -22,7 +22,7 @@ import { toast } from "./ui-common.js";
 // pour identifier une éventuelle panne silencieuse sur un appareil donné. Peut être désactivé
 // une fois le bon fonctionnement confirmé sur le terrain (mettre DIAG_TOASTS à false).
 const DIAG_TOASTS = true;
-const DIAG_BUILD_TAG = "detail-diag-v9";
+const DIAG_BUILD_TAG = "detail-diag-v10";
 
 // Bandeau PERMANENT (ne disparaît jamais tout seul, contrairement à un toast) pour ne plus
 // jamais rater un message par manque de timing — il affiche en continu les derniers messages

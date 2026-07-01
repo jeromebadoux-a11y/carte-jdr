@@ -114,8 +114,8 @@ export function render() {
   const sx = topLeft.x, sy = topLeft.y;
   const sw = bottomRight.x - topLeft.x, sh = bottomRight.y - topLeft.y;
 
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
+  // (le lissage est décidé finement DANS drawMapLayer, selon qu'on affiche ou non plus d'un
+  // pixel d'écran par pixel source réellement disponible — voir applySmoothingForDensity)
   drawMapLayer(ctx, sx, sy, sw, sh, 0, 0, w, h);
   scheduleDetailUpdate();
 
@@ -165,17 +165,46 @@ export function renderAll() {
 // Choisit la meilleure source pour dessiner la zone (sx,sy,sw,sh) [coordonnées "monde"] :
 // la vignette haute résolution (App.detail) si elle couvre entièrement cette zone, sinon la
 // vue d'ensemble. Voir detail.js pour le mécanisme de chargement de la vignette.
+let lastSmoothingDiag = null;
+
 function drawMapLayer(ctx2d, sx, sy, sw, sh, dx, dy, dw, dh) {
+  // Pixels d'écran (device) par unité "monde" (= par pixel de la VUE D'ENSEMBLE, par construction).
+  const dpr = canvas.width / Math.max(1, viewport.clientWidth);
+  const devicePxPerWorld = (dw / sw) * dpr;
+
   const d = App.detail;
   if (d && d.image && d.rect.w > 0 && d.rect.h > 0 && rectContainsWorld(d.rect, sx, sy, sw, sh)) {
     const r = d.rect, img = d.image;
     const scaleX = img.width / r.w, scaleY = img.height / r.h;
     const lsx = (sx - r.x) * scaleX, lsy = (sy - r.y) * scaleY;
     const lsw = sw * scaleX, lsh = sh * scaleY;
+    // pixels d'écran par pixel de la vignette détail (source la plus fine dont on dispose ici)
+    applySmoothingForDensity(ctx2d, devicePxPerWorld / Math.min(scaleX, scaleY), "détail");
     safeDrawImage(ctx2d, img, lsx, lsy, lsw, lsh, dx, dy, dw, dh);
     return;
   }
+  // pas de vignette détail active : la source la plus fine dispo est la vue d'ensemble elle-même
+  applySmoothingForDensity(ctx2d, devicePxPerWorld, "vue d'ensemble");
   safeDrawImage(ctx2d, App.mapImage, sx, sy, sw, sh, dx, dy, dw, dh);
+}
+
+// Une fois qu'on affiche CHAQUE pixel de la source disponible en PLUS d'un pixel d'écran, on a
+// dépassé toute la résolution réellement disponible (peu importe la source : vignette détail native
+// ou vue d'ensemble) — à partir de là, un lissage "haute qualité" (interpolation bicubique) rend le
+// résultat plus doux/flou qu'un simple agrandissement "pixel net", sans apporter la moindre info
+// réelle en plus. Beaucoup de visualisateurs d'images (et la loupe d'accessibilité elle-même quand
+// elle agrandit encore par-dessus) basculent sur un rendu plus "cru" passé ce point plutôt que de
+// lisser un agrandissement qui n'a plus de détail à révéler — ce qui peut expliquer une netteté
+// perçue différente entre l'app et un visualisateur natif une fois qu'on zoome très fort.
+function applySmoothingForDensity(ctx2d, devicePxPerSourcePx, sourceLabel) {
+  const oversampling = devicePxPerSourcePx > 1.02;
+  ctx2d.imageSmoothingEnabled = !oversampling;
+  if (!oversampling) ctx2d.imageSmoothingQuality = "high";
+  const tag = oversampling ? "pixel net (au-delà du natif)" : "lissé (haute qualité)";
+  if (tag !== lastSmoothingDiag) {
+    lastSmoothingDiag = tag;
+    diag(`Rendu : ${tag} — source « ${sourceLabel} », ${devicePxPerSourcePx.toFixed(2)} px écran / px source`);
+  }
 }
 
 function rectContainsWorld(outer, x, y, w, h) {
