@@ -1,5 +1,5 @@
 // service-worker.js — mise en cache complète de l'app pour un fonctionnement 100% hors ligne.
-const CACHE_NAME = "rpgmap-cache-v2";
+const CACHE_NAME = "rpgmap-cache-v3";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -42,21 +42,23 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+// Stratégie "réseau d'abord, cache en secours" : quand la tablette a du réseau, l'app
+// récupère toujours la dernière version publiée (et met le cache à jour au passage) —
+// donc une mise à jour du site prend effet dès la prochaine ouverture avec connexion,
+// sans dépendre d'un changement de ce fichier service-worker.js lui-même. Hors ligne,
+// on retombe sur la dernière version mise en cache pour que l'app continue de fonctionner.
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return; // ne gère que les ressources de l'app elle-même
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-          return res;
-        })
-        .catch(() => cached);
-    })
+    fetch(event.request)
+      .then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        return res;
+      })
+      .catch(() => caches.match(event.request))
   );
 });

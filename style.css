@@ -184,15 +184,19 @@ textarea#label-text-input{
 }
 .map-label.selected{ outline:2px dashed #fff; }
 
+/* pointer-events:none partout ici : le recadrage est entièrement piloté par mapview.js
+   via ses propres tests de collision (poignées / corps du rectangle) sur les évènements
+   reçus par le canvas/viewport en dessous. Si ces éléments interceptaient le toucher,
+   celui-ci n'atteindrait jamais le canvas et le recadrage serait impossible à manipuler. */
 #crop-overlay{
-  position:absolute; inset:0; background:rgba(0,0,0,.35); touch-action:none;
+  position:absolute; inset:0; background:rgba(0,0,0,.35); touch-action:none; pointer-events:none;
 }
 .crop-rect{
-  position:absolute; border:2px dashed var(--accent); background:rgba(217,154,58,.12);
+  position:absolute; border:2px dashed var(--accent); background:rgba(217,154,58,.12); pointer-events:none;
 }
 .crop-handle{
   position:absolute; width:22px; height:22px; background:var(--accent); border-radius:50%; transform:translate(-50%,-50%);
-  border:2px solid #fff;
+  border:2px solid #fff; pointer-events:none;
 }
 
 .no-map-hint{
