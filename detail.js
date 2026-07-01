@@ -22,7 +22,7 @@ import { toast } from "./ui-common.js";
 // pour identifier une éventuelle panne silencieuse sur un appareil donné. Peut être désactivé
 // une fois le bon fonctionnement confirmé sur le terrain (mettre DIAG_TOASTS à false).
 const DIAG_TOASTS = true;
-const DIAG_BUILD_TAG = "detail-diag-v5";
+const DIAG_BUILD_TAG = "detail-diag-v6";
 
 // Bandeau PERMANENT (ne disparaît jamais tout seul, contrairement à un toast) pour ne plus
 // jamais rater un message par manque de timing — il affiche en continu les derniers messages
@@ -209,7 +209,15 @@ async function evaluateDetailNeed() {
       if (loaded) releaseDetailImage(loaded);
       return;
     }
-    diag(`Détail : chargé (${loaded.image.width}×${loaded.image.height}px)`);
+    // Chiffres clés pour distinguer un vrai bug (on pourrait faire mieux) d'un plafond matériel
+    // incontournable (le "natif idéal" pour la zone visible dépasse déjà ce que le GPU accepte) :
+    // "natif idéal" = résolution qu'aurait la zone strictement visible à la résolution d'origine
+    // du fichier importé ; "plafond GPU" = limite sûre détectée pour cet appareil.
+    const origW = c.mapOriginalWidth || c.mapWidth, origH = c.mapOriginalHeight || c.mapHeight;
+    const scaleX = origW / c.mapWidth, scaleY = origH / c.mapHeight;
+    const idealW = Math.round(visible.w * scaleX), idealH = Math.round(visible.h * scaleY);
+    const safeDim = getMaxSafeTextureSize();
+    diag(`Détail : chargé ${loaded.image.width}×${loaded.image.height}px (natif idéal pour l'écran : ${idealW}×${idealH}px, plafond GPU : ${safeDim}px)`);
     releaseDetailImage(App.detail);
     App.detail = loaded;
     requestRender();
