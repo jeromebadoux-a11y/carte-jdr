@@ -188,22 +188,20 @@ function drawMapLayer(ctx2d, sx, sy, sw, sh, dx, dy, dw, dh) {
   safeDrawImage(ctx2d, App.mapImage, sx, sy, sw, sh, dx, dy, dw, dh);
 }
 
-// Une fois qu'on affiche CHAQUE pixel de la source disponible en PLUS d'un pixel d'écran, on a
-// dépassé toute la résolution réellement disponible (peu importe la source : vignette détail native
-// ou vue d'ensemble) — à partir de là, un lissage "haute qualité" (interpolation bicubique) rend le
-// résultat plus doux/flou qu'un simple agrandissement "pixel net", sans apporter la moindre info
-// réelle en plus. Beaucoup de visualisateurs d'images (et la loupe d'accessibilité elle-même quand
-// elle agrandit encore par-dessus) basculent sur un rendu plus "cru" passé ce point plutôt que de
-// lisser un agrandissement qui n'a plus de détail à révéler — ce qui peut expliquer une netteté
-// perçue différente entre l'app et un visualisateur natif une fois qu'on zoome très fort.
+// Testé puis ABANDONNÉ (voir historique) : basculer sur "pixel net" (imageSmoothingEnabled=false,
+// façon plus-proche-voisin) une fois au-delà de la résolution native donnait un résultat PIRE
+// (image visiblement pixelisée) que le lissage — le visualisateur d'images de référence n'utilise
+// clairement pas ce mode-là non plus quand il agrandit au-delà du natif. On reste donc sur un
+// lissage "haute qualité" en permanence ; seule la mesure (px écran par px source dispo) est
+// conservée à titre de diagnostic, sans changer le mode de rendu.
 function applySmoothingForDensity(ctx2d, devicePxPerSourcePx, sourceLabel) {
+  ctx2d.imageSmoothingEnabled = true;
+  ctx2d.imageSmoothingQuality = "high";
   const oversampling = devicePxPerSourcePx > 1.02;
-  ctx2d.imageSmoothingEnabled = !oversampling;
-  if (!oversampling) ctx2d.imageSmoothingQuality = "high";
-  const tag = oversampling ? "pixel net (au-delà du natif)" : "lissé (haute qualité)";
+  const tag = oversampling ? "au-delà du natif" : "dans la résolution native";
   if (tag !== lastSmoothingDiag) {
     lastSmoothingDiag = tag;
-    diag(`Rendu : ${tag} — source « ${sourceLabel} », ${devicePxPerSourcePx.toFixed(2)} px écran / px source`);
+    diag(`Rendu : lissé (haute qualité), ${tag} — source « ${sourceLabel} », ${devicePxPerSourcePx.toFixed(2)} px écran / px source`);
   }
 }
 

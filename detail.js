@@ -18,11 +18,12 @@ import { getMaxSafeTextureSize } from "./mapload.js";
 import { toast } from "./ui-common.js";
 
 // Diagnostic temporaire et visible à l'écran (pas seulement dans la console, inaccessible sur
-// tablette) : montre ce que fait réellement le système de détail pendant qu'on zoome/recadre,
-// pour identifier une éventuelle panne silencieuse sur un appareil donné. Peut être désactivé
-// une fois le bon fonctionnement confirmé sur le terrain (mettre DIAG_TOASTS à false).
-const DIAG_TOASTS = true;
-const DIAG_BUILD_TAG = "detail-diag-v10";
+// tablette) : montrait ce que faisait réellement le système de détail pendant qu'on zoome/recadre,
+// pour identifier une éventuelle panne silencieuse sur un appareil donné. Le bon fonctionnement a
+// été confirmé sur le terrain (tablette réelle) — désactivé pour une app propre en usage normal.
+// Remettre à true (et voir DIAG_BUILD_TAG plus bas) pour ré-enquêter un jour si besoin.
+const DIAG_TOASTS = false;
+const DIAG_BUILD_TAG = "detail-diag-v11";
 
 // Bandeau PERMANENT (ne disparaît jamais tout seul, contrairement à un toast) pour ne plus
 // jamais rater un message par manque de timing — il affiche en continu les derniers messages
