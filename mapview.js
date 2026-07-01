@@ -34,6 +34,39 @@ export function initMapView() {
   viewport.addEventListener("pointercancel", onPointerUp);
   viewport.addEventListener("pointerleave", onPointerUp);
   viewport.addEventListener("wheel", onWheel, { passive: false });
+
+  watchVisualViewportZoom();
+}
+
+// ============ détection d'un zoom navigateur (page) actif en plus du zoom de l'app ============
+// Hypothèse à vérifier : sur certaines tablettes Android, un réglage d'accessibilité de Chrome
+// ("Forcer l'activation du zoom") permet au pincement à deux doigts de zoomer la PAGE ENTIÈRE
+// (visualViewport.scale > 1) même si la balise <meta viewport> demande user-scalable=no. Si ça
+// se produit pendant qu'on pince pour zoomer dans l'app, notre canvas — déjà rendu bien net à
+// la bonne résolution — se retrouve ENSUITE ré-agrandi par le navigateur comme une simple image
+// étirée, ce qui introduirait un flou qui n'a rien à voir avec la résolution de la carte source.
+// Ça expliquerait : net dans le visualisateur de photos (pas de zoom page actif), moins net dans
+// l'app sur tablette en pinçant (zoom page qui s'ajoute), aucune différence sur PC (pas de
+// pincement tactile déclenchant un zoom page). On ne peut pas désactiver ce réglage depuis le
+// code (c'est un choix utilisateur/accessibilité) mais on peut le détecter et prévenir.
+let vvWarned = false;
+function watchVisualViewportZoom() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const check = () => {
+    const scale = vv.scale || 1;
+    if (Math.abs(scale - 1) > 0.02) {
+      if (!vvWarned) {
+        vvWarned = true;
+        diag(`⚠️ Zoom du NAVIGATEUR détecté (échelle page = ${scale.toFixed(2)}) en plus du zoom de l'app — ceci peut rendre l'image floue. Vérifie Chrome ▸ Paramètres ▸ Accessibilité ▸ « Forcer l'activation du zoom » et désactive-le si présent.`);
+      }
+    } else {
+      vvWarned = false;
+    }
+  };
+  vv.addEventListener("resize", check);
+  vv.addEventListener("scroll", check);
+  check();
 }
 
 let lastDiagedRealDpr = null;
