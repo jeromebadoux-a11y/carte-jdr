@@ -3,6 +3,7 @@ import { App, resetViewToBounds, doAutosave } from "./state.js";
 import { listCampaignsMeta, getCampaign, saveCampaign, newCampaign, deleteCampaign, uid } from "./db.js";
 import { importCampaignFromFile } from "./fileio.js";
 import { initMapView, renderAll, zoomBy, zoomFit } from "./mapview.js";
+import { resetDetailState } from "./detail.js";
 import { initFogForMap, loadFogFromBlob } from "./fog.js";
 import { loadMapImageFromBlob } from "./mapload.js";
 import { initGmUI, refreshRegionsList, updateMapInfo } from "./ui-gm.js";
@@ -106,6 +107,7 @@ async function openCampaign(id) {
   App.fogCanvas = null; App.fogCtx = null;
   App.selectedSymbolId = null; App.selectedLabelId = null;
   App.armedSymbolType = null; App.armedLabel = false;
+  resetDetailState(); // une vignette haute résolution d'une autre partie ne doit jamais s'afficher ici
 
   document.getElementById("screen-campaigns").classList.add("hidden");
   document.getElementById("app").classList.remove("hidden");

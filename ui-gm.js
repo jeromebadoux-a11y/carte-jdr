@@ -11,6 +11,7 @@ import { createRegionFromRect, setActiveRegion, renameRegion, deleteRegion } fro
 import { updateScaleBar } from "./scalebar.js";
 import { toast, promptModal, confirmModal } from "./ui-common.js";
 import { loadMapImageFromBlob, resizeImageToBlob, MAP_QUALITY_PRESETS } from "./mapload.js";
+import { resetDetailState } from "./detail.js";
 import { exportCampaignToFile } from "./fileio.js";
 import { goBackToCampaignList } from "./main.js";
 
@@ -94,12 +95,19 @@ function initCarteTab() {
     try {
       const qualityKey = document.getElementById("map-quality").value;
       const maxDim = MAP_QUALITY_PRESETS[qualityKey] ?? MAP_QUALITY_PRESETS.high;
-      const { blob, width, height, originalWidth, originalHeight } = await resizeImageToBlob(file, maxDim);
+      const { blob, width, height, originalWidth, originalHeight, cappedByDevice } = await resizeImageToBlob(file, maxDim);
+      resetDetailState(); // une nouvelle carte invalide toute vignette haute résolution de l'ancienne
       App.campaign.mapImageBlob = blob;
       App.campaign.mapWidth = width;
       App.campaign.mapHeight = height;
       App.campaign.mapOriginalWidth = originalWidth;
       App.campaign.mapOriginalHeight = originalHeight;
+      App.campaign.mapCappedByDevice = cappedByDevice;
+      // Conserve le fichier importé tel quel (même s'il est réduit pour l'affichage d'ensemble
+      // ci-dessus) afin de pouvoir en découper des portions en pleine résolution plus tard,
+      // quand le MJ zoome fort ou recadre une région (voir detail.js). Inutile de le garder
+      // en double si l'image d'ensemble est déjà à la résolution native (rien à gagner).
+      App.campaign.originalImageBlob = width < originalWidth || height < originalHeight ? file : null;
       App.campaign.regions = [];
       App.campaign.activeRegionId = null;
       await loadMapImageFromBlob(blob);
@@ -110,7 +118,11 @@ function initCarteTab() {
       updateMapInfo();
       refreshRegionsList();
       markDirty();
-      toast(width < originalWidth ? "Carte importée (réduite pour rester fluide) ✔" : "Carte importée à sa résolution d'origine ✔");
+      if (cappedByDevice) {
+        toast("Réduite en dessous du réglage choisi : la puce graphique de cet appareil ne gère pas plus grand ✔");
+      } else {
+        toast(width < originalWidth ? "Carte importée (réduite pour rester fluide) ✔" : "Carte importée à sa résolution d'origine ✔");
+      }
       App.els.noMapHint.classList.add("hidden");
     } catch (e) {
       console.error(e);
@@ -176,8 +188,12 @@ export function updateMapInfo() {
   if (!c?.mapWidth) { box.classList.add("hidden"); return; }
   box.classList.remove("hidden");
   const reduced = c.mapOriginalWidth && c.mapOriginalWidth > c.mapWidth;
+  const deviceNote = c.mapCappedByDevice ? " — limité par la puce graphique de cet appareil, pas par le réglage choisi" : "";
+  const zoomNote = reduced && c.originalImageBlob
+    ? " · le détail d'origine est automatiquement rechargé en zoomant ou en recadrant une région"
+    : "";
   box.textContent = reduced
-    ? `Carte : ${c.mapWidth} × ${c.mapHeight} px (réduite depuis l'original ${c.mapOriginalWidth} × ${c.mapOriginalHeight} px)`
+    ? `Carte : ${c.mapWidth} × ${c.mapHeight} px (réduite depuis l'original ${c.mapOriginalWidth} × ${c.mapOriginalHeight} px${deviceNote})${zoomNote}`
     : `Carte : ${c.mapWidth} × ${c.mapHeight} px (résolution d'origine conservée)`;
 }
 

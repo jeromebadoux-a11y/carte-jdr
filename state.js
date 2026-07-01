@@ -7,9 +7,15 @@ export const MAX_FOG_DIM = 3072;
 
 export const App = {
   campaign: null,        // objet campagne courant (voir db.js:newCampaign)
-  mapImage: null,        // HTMLImageElement (image native complète de la carte globale)
+  mapImage: null,        // HTMLImageElement (image "vue d'ensemble", résolution capée pour tenir en une seule texture GPU)
   fogCanvas: null,       // OffscreenCanvas/canvas mémoire contenant le masque de brouillard complet
   fogCtx: null,
+
+  // Vignette "haute résolution" affichée par-dessus la vue d'ensemble quand on est suffisamment
+  // zoomé (ou qu'une région recadrée est active) : { image, rect:{x,y,w,h} en coordonnées "monde" }.
+  // Décodée à la demande depuis campaign.originalImageBlob (voir detail.js). null si non applicable
+  // (pas assez zoomé, pas d'original conservé, ou chargement pas encore terminé).
+  detail: null,
 
   mode: "gm",            // 'gm' | 'play'
   gmTab: "carte",

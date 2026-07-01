@@ -5,6 +5,11 @@ import { brushStroke, onFogChanged, getFogPattern } from "./fog.js";
 import { refreshSymbolVisibility, placeSymbolAt, renderSymbols } from "./symbols.js";
 import { refreshLabelVisibility, placeLabelAt, renderLabels } from "./labels.js";
 import { updateScaleBar } from "./scalebar.js";
+import { scheduleDetailUpdate } from "./detail.js";
+
+// dès qu'une vignette haute résolution finit de se charger en arrière-plan, on redessine
+// pour l'afficher (sans quoi il faudrait attendre un prochain pan/zoom pour la voir apparaître).
+document.addEventListener("app:detail-ready", () => { render(); });
 
 let canvas, ctx, viewport, cropOverlay;
 let fogScratch, fogScratchCtx; // buffer intermédiaire pour recolorer le masque de brouillard avec la texture nuageuse
@@ -64,7 +69,9 @@ export function render() {
   const sw = bottomRight.x - topLeft.x, sh = bottomRight.y - topLeft.y;
 
   ctx.imageSmoothingEnabled = true;
-  safeDrawImage(ctx, App.mapImage, sx, sy, sw, sh, 0, 0, w, h);
+  ctx.imageSmoothingQuality = "high";
+  drawMapLayer(ctx, sx, sy, sw, sh, 0, 0, w, h);
+  scheduleDetailUpdate();
 
   if (App.fogCanvas && fogScratch) {
     const fs = App.campaign.fogScale;
@@ -78,15 +85,16 @@ export function render() {
 
     // 2) recolore uniquement cette forme avec une texture "nuageuse", ancrée aux coordonnées
     //    de la carte (donc fixe par rapport à la carte quand on déplace/zoome la vue).
+    //    On transforme le CONTEXTE (translate+scale, une API canvas basique et fiable
+    //    partout) plutôt que le pattern lui-même (CanvasPattern.setTransform s'est avéré
+    //    peu fiable sur certains navigateurs/tablettes, provoquant un motif étiré pendant
+    //    le zoom au lieu de rester ancré à la carte).
     fogScratchCtx.save();
     fogScratchCtx.globalCompositeOperation = "source-in";
-    const pattern = getFogPattern();
+    fogScratchCtx.fillStyle = getFogPattern();
     const origin = worldToScreen(0, 0);
-    if (pattern.setTransform) {
-      pattern.setTransform(new DOMMatrix().translate(origin.x, origin.y).scale(App.view.zoom, App.view.zoom));
-    }
-    fogScratchCtx.fillStyle = pattern;
-    fogScratchCtx.fillRect(0, 0, fw, fh);
+    fogScratchCtx.setTransform(App.view.zoom, 0, 0, App.view.zoom, origin.x, origin.y);
+    fogScratchCtx.fillRect(sx, sy, sw, sh);
     fogScratchCtx.restore();
 
     // En Mode MJ, le brouillard est semi-transparent : le MJ voit toujours la carte
@@ -106,6 +114,28 @@ export function renderAll() {
   renderSymbols();
   renderLabels();
   updateScaleBar();
+}
+
+// Choisit la meilleure source pour dessiner la zone (sx,sy,sw,sh) [coordonnées "monde"] :
+// la vignette haute résolution (App.detail) si elle couvre entièrement cette zone, sinon la
+// vue d'ensemble. Voir detail.js pour le mécanisme de chargement de la vignette.
+function drawMapLayer(ctx2d, sx, sy, sw, sh, dx, dy, dw, dh) {
+  const d = App.detail;
+  if (d && d.image && d.rect.w > 0 && d.rect.h > 0 && rectContainsWorld(d.rect, sx, sy, sw, sh)) {
+    const r = d.rect, img = d.image;
+    const scaleX = img.width / r.w, scaleY = img.height / r.h;
+    const lsx = (sx - r.x) * scaleX, lsy = (sy - r.y) * scaleY;
+    const lsw = sw * scaleX, lsh = sh * scaleY;
+    safeDrawImage(ctx2d, img, lsx, lsy, lsw, lsh, dx, dy, dw, dh);
+    return;
+  }
+  safeDrawImage(ctx2d, App.mapImage, sx, sy, sw, sh, dx, dy, dw, dh);
+}
+
+function rectContainsWorld(outer, x, y, w, h) {
+  const eps = 0.5;
+  return x >= outer.x - eps && y >= outer.y - eps &&
+    (x + w) <= outer.x + outer.w + eps && (y + h) <= outer.y + outer.h + eps;
 }
 
 // drawImage protégé contre des rectangles source hors bornes (bords de carte)
@@ -159,16 +189,30 @@ export function zoomFit() {
 }
 
 // ============ gestion pointeurs (souris + tactile multi-doigts) ============
+// Deux doigts posés pour zoomer ne touchent jamais l'écran à la microseconde près : le
+// premier déclenchait aussitôt l'outil actif (pinceau de brouillard, pose de symbole/label…)
+// avant que le second doigt n'arrive et transforme le geste en pincement. On retarde donc
+// légèrement le démarrage d'une action à un seul doigt, le temps de voir si un second doigt
+// rejoint le geste — sauf si le premier doigt bouge déjà nettement, auquel cas on démarre
+// tout de suite (pour qu'un vrai geste à un doigt — pan, pinceau, glisser — reste réactif).
+const MULTITOUCH_GRACE_MS = 140;
+const PENDING_MOVE_THRESHOLD = 10;
+let pendingGesture = null; // { pointerId, sx, sy, timer }
+
 function onPointerDown(ev) {
   if (ev.target !== canvas && ev.target !== viewport) return; // laisse les pins/labels gérer leur propre drag
-  viewport.setPointerCapture?.(ev.pointerId);
+  try { viewport.setPointerCapture?.(ev.pointerId); } catch (e) { /* pointeur non "actif" pour le navigateur : sans conséquence, on continue */ }
   pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
 
   if (pointers.size === 1) {
     const rect = viewport.getBoundingClientRect();
     const sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
-    beginSingleGesture(sx, sy);
+    pendingGesture = {
+      pointerId: ev.pointerId, sx, sy,
+      timer: setTimeout(() => { pendingGesture = null; beginSingleGesture(sx, sy); }, MULTITOUCH_GRACE_MS),
+    };
   } else if (pointers.size === 2) {
+    if (pendingGesture) { clearTimeout(pendingGesture.timer); pendingGesture = null; }
     endSingleGesture();
     beginPinch();
   }
@@ -179,15 +223,38 @@ function onPointerMove(ev) {
   pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
 
   if (pointers.size >= 2) {
+    if (pendingGesture) { clearTimeout(pendingGesture.timer); pendingGesture = null; }
     updatePinch();
     return;
   }
+
   const rect = viewport.getBoundingClientRect();
   const sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
+
+  if (pendingGesture && pendingGesture.pointerId === ev.pointerId) {
+    const dist = Math.hypot(sx - pendingGesture.sx, sy - pendingGesture.sy);
+    if (dist > PENDING_MOVE_THRESHOLD) {
+      clearTimeout(pendingGesture.timer);
+      const { sx: startSx, sy: startSy } = pendingGesture;
+      pendingGesture = null;
+      beginSingleGesture(startSx, startSy);
+      moveSingleGesture(sx, sy);
+    }
+    return; // geste encore en attente : pas de mouvement appliqué tant qu'il n'a pas démarré
+  }
+
   moveSingleGesture(sx, sy);
 }
 
 function onPointerUp(ev) {
+  if (pendingGesture && pendingGesture.pointerId === ev.pointerId) {
+    // le doigt est levé avant la fin du délai, sans qu'un second doigt ne rejoigne le
+    // geste : on le traite comme un petit geste rapide (tap), démarré puis aussitôt terminé.
+    clearTimeout(pendingGesture.timer);
+    const { sx, sy } = pendingGesture;
+    pendingGesture = null;
+    beginSingleGesture(sx, sy);
+  }
   pointers.delete(ev.pointerId);
   if (pointers.size < 2) pinch = null;
   if (pointers.size === 0) endSingleGesture();

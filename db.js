@@ -96,6 +96,12 @@ export function newCampaign(name) {
     mapWidth: 0,
     mapHeight: 0,
     mapImageBlob: null,
+    // fichier original importé, conservé tel quel (même s'il est plus grand que mapImageBlob)
+    // pour permettre un découpage à la demande en haute résolution lors d'un zoom/recadrage
+    // (voir detail.js). Peut être absent sur d'anciennes parties créées avant cette fonctionnalité.
+    originalImageBlob: null,
+    mapOriginalWidth: 0,
+    mapOriginalHeight: 0,
     fogWidth: 0,
     fogHeight: 0,
     fogScale: 0.5,

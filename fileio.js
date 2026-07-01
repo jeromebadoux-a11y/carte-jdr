@@ -23,12 +23,17 @@ export async function exportCampaignToFile(campaign) {
     ...campaign,
     mapImageBlob: undefined,
     fogBlob: undefined,
+    originalImageBlob: undefined,
     mapImageDataURL: await blobToDataURL(campaign.mapImageBlob),
     fogDataURL: await blobToDataURL(campaign.fogBlob),
+    // le fichier d'origine (haute résolution) permet le zoom détaillé après ré-import ;
+    // absent sur les parties créées avant cette fonctionnalité (pas d'erreur, juste dégradé).
+    originalImageDataURL: await blobToDataURL(campaign.originalImageBlob),
     _fileFormat: "rpgmap-v1",
   };
   delete exportable.mapImageBlob;
   delete exportable.fogBlob;
+  delete exportable.originalImageBlob;
 
   const json = JSON.stringify(exportable);
   const blob = new Blob([json], { type: "application/json" });
@@ -53,8 +58,10 @@ export async function importCampaignFromFile(file) {
   }
   data.mapImageBlob = await dataURLToBlob(data.mapImageDataURL);
   data.fogBlob = await dataURLToBlob(data.fogDataURL);
+  data.originalImageBlob = await dataURLToBlob(data.originalImageDataURL);
   delete data.mapImageDataURL;
   delete data.fogDataURL;
+  delete data.originalImageDataURL;
   delete data._fileFormat;
   return data;
 }
