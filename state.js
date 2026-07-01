@@ -1,9 +1,9 @@
 // state.js — état central partagé de l'application.
 import { saveCampaign } from "./db.js";
 
-export const MAX_MAP_DIM = 4096;   // taille max (px) à laquelle une image de carte importée est redimensionnée
+// Les préréglages de qualité d'import de carte vivent dans mapload.js (MAP_QUALITY_PRESETS).
 export const FOG_SCALE_DEFAULT = 0.5; // résolution du masque de brouillard relative à la carte
-export const MAX_FOG_DIM = 2048;
+export const MAX_FOG_DIM = 3072;
 
 export const App = {
   campaign: null,        // objet campagne courant (voir db.js:newCampaign)

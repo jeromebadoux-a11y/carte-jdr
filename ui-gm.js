@@ -10,7 +10,7 @@ import { getSelectedLabel, deleteSelectedLabel, setSelectedLabelLayer, renderLab
 import { createRegionFromRect, setActiveRegion, renameRegion, deleteRegion } from "./regions.js";
 import { updateScaleBar } from "./scalebar.js";
 import { toast, promptModal, confirmModal } from "./ui-common.js";
-import { loadMapImageFromBlob, resizeImageToBlob } from "./mapload.js";
+import { loadMapImageFromBlob, resizeImageToBlob, MAP_QUALITY_PRESETS } from "./mapload.js";
 import { exportCampaignToFile } from "./fileio.js";
 import { goBackToCampaignList } from "./main.js";
 
@@ -92,10 +92,14 @@ function initCarteTab() {
     if (!file) return;
     toast("Import de la carte en cours…");
     try {
-      const { blob, width, height } = await resizeImageToBlob(file);
+      const qualityKey = document.getElementById("map-quality").value;
+      const maxDim = MAP_QUALITY_PRESETS[qualityKey] ?? MAP_QUALITY_PRESETS.high;
+      const { blob, width, height, originalWidth, originalHeight } = await resizeImageToBlob(file, maxDim);
       App.campaign.mapImageBlob = blob;
       App.campaign.mapWidth = width;
       App.campaign.mapHeight = height;
+      App.campaign.mapOriginalWidth = originalWidth;
+      App.campaign.mapOriginalHeight = originalHeight;
       App.campaign.regions = [];
       App.campaign.activeRegionId = null;
       await loadMapImageFromBlob(blob);
@@ -106,11 +110,11 @@ function initCarteTab() {
       updateMapInfo();
       refreshRegionsList();
       markDirty();
-      toast("Carte importée ✔");
+      toast(width < originalWidth ? "Carte importée (réduite pour rester fluide) ✔" : "Carte importée à sa résolution d'origine ✔");
       App.els.noMapHint.classList.add("hidden");
     } catch (e) {
       console.error(e);
-      toast("Échec de l'import de l'image.");
+      toast("Échec de l'import de l'image — essaie une qualité inférieure si l'image est très grande.");
     }
     input.value = "";
   });
@@ -166,11 +170,15 @@ function initRegionsTab() {
   });
 }
 
-function updateMapInfo() {
+export function updateMapInfo() {
   const box = document.getElementById("map-info");
-  if (!App.campaign?.mapWidth) { box.classList.add("hidden"); return; }
+  const c = App.campaign;
+  if (!c?.mapWidth) { box.classList.add("hidden"); return; }
   box.classList.remove("hidden");
-  box.textContent = `Carte : ${App.campaign.mapWidth} × ${App.campaign.mapHeight} px`;
+  const reduced = c.mapOriginalWidth && c.mapOriginalWidth > c.mapWidth;
+  box.textContent = reduced
+    ? `Carte : ${c.mapWidth} × ${c.mapHeight} px (réduite depuis l'original ${c.mapOriginalWidth} × ${c.mapOriginalHeight} px)`
+    : `Carte : ${c.mapWidth} × ${c.mapHeight} px (résolution d'origine conservée)`;
 }
 
 // ---------- Onglet Brouillard ----------

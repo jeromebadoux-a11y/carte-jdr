@@ -5,7 +5,7 @@ import { importCampaignFromFile } from "./fileio.js";
 import { initMapView, renderAll, zoomBy, zoomFit } from "./mapview.js";
 import { initFogForMap, loadFogFromBlob } from "./fog.js";
 import { loadMapImageFromBlob } from "./mapload.js";
-import { initGmUI, refreshRegionsList } from "./ui-gm.js";
+import { initGmUI, refreshRegionsList, updateMapInfo } from "./ui-gm.js";
 import { initPlayUI, resetPlaySafety } from "./ui-play.js";
 import { toast, confirmModal } from "./ui-common.js";
 
@@ -129,6 +129,7 @@ async function openCampaign(id) {
   } else {
     App.els.noMapHint.classList.remove("hidden");
   }
+  updateMapInfo();
 
   setMode("gm");
   resetViewToBounds();

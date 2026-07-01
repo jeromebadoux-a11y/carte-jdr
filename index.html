@@ -70,6 +70,17 @@
           <h3>Carte globale</h3>
           <p class="hint">Importe une carte (image), même très grande et détaillée. Tu pourras ensuite en sélectionner une partie pour le scénario en cours.</p>
           <p class="hint">ℹ️ Par défaut, une carte importée est entièrement recouverte de brouillard (normal, rien n'est encore révélé). En Mode MJ tu la vois quand même en transparence pour t'orienter — va dans l'onglet « Brouillard » pour révéler les zones voulues.</p>
+
+          <label class="field">Qualité de la carte importée
+            <select id="map-quality">
+              <option value="fast">Rapide (max 4096 px) — le plus fluide</option>
+              <option value="high" selected>Élevée (max 8192 px) — recommandé</option>
+              <option value="veryhigh">Très élevée (max 12288 px) — cartes très détaillées</option>
+              <option value="original">Originale (aucune réduction) — peut ralentir/planter sur tablette</option>
+            </select>
+          </label>
+          <p class="hint">Une image plus détaillée que le réglage choisi est réduite pour rester fluide sur tablette. Choisis « Élevée »/« Très élevée » si ta carte perd trop de détail, mais teste bien sur la tablette elle-même : plus la valeur est haute, plus elle demande de mémoire.</p>
+
           <label class="btn btn-secondary btn-block" for="input-map-file">🖼️ Importer une image de carte</label>
           <input type="file" id="input-map-file" accept="image/*" hidden>
           <div id="map-info" class="info-box hidden"></div>
