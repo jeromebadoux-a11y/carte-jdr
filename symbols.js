@@ -2,37 +2,45 @@
 import { App, worldToScreen, screenToWorld, markDirty } from "./state.js";
 import { fogOpacityAt } from "./fog.js";
 
-// Petits SVG monochromes dessinés à la main pour les symboles sans bon équivalent Unicode dans
-// un univers médiéval-fantastique (pas de tour de pierre, pont ancien, navire d'époque, sac en
-// cuir ou entrée de caverne explicite parmi les émojis standards — les alternatives disponibles
-// sont soit trop modernes (pont suspendu, sac à dos en nylon, voilier de régate), soit trop
-// abstraites (🕳️ pour une grotte)). Couleur "currentColor" pour bien se fondre avec le style du
-// pin (y compris le rendu noir & blanc des symboles posés par les joueurs, voir style.css).
-// Pont : un tablier plat posé sur des piles, au-dessus d'une ligne d'eau ondulée — volontairement
+// Petits SVG dessinés à la main pour les symboles sans bon équivalent Unicode dans un univers
+// médiéval-fantastique (pas de maison médiévale, tour de pierre, pont ancien, navire d'époque,
+// sac en cuir ou entrée de caverne explicite parmi les émojis standards). Contrairement au
+// premier essai (traits blancs fins façon icône), ceux-ci sont dessinés EN COULEURS PLEINES,
+// façon petite illustration plate, pour rester dans le même registre visuel que les émojis
+// (🧙💰🏰🔥…) plutôt que de trancher avec eux comme des pictogrammes de style différent.
+const SVG_MAISON = `<svg viewBox="0 0 24 24" width="20" height="20">
+  <path d="M4 21 L4 12 L12 5 L20 12 L20 21 Z" fill="#c9a876"/>
+  <path d="M2.3 13 L12 4 L21.7 13 L18.5 13 L12 7.2 L5.5 13 Z" fill="#6b4226"/>
+  <rect x="10" y="14.5" width="4" height="6.5" fill="#4a2f1c"/>
+  <rect x="6" y="14.5" width="3" height="3" fill="#8fb3c9" stroke="#4a2f1c" stroke-width=".4"/>
+  <rect x="15" y="14.5" width="3" height="3" fill="#8fb3c9" stroke="#4a2f1c" stroke-width=".4"/>
+</svg>`;
+// Pont : un tablier de bois posé sur des piles, au-dessus d'une rivière — volontairement
 // différent de la voûte de la caverne (ci-dessous) pour ne pas les confondre à petite taille.
-const SVG_PONT = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-  <line x1="2" y1="9" x2="22" y2="9" />
-  <line x1="7" y1="9" x2="7" y2="17" />
-  <line x1="17" y1="9" x2="17" y2="17" />
-  <path d="M2 19 Q7 16.3 12 19 Q17 21.7 22 19" />
+const SVG_PONT = `<svg viewBox="0 0 24 24" width="20" height="20">
+  <path d="M2 18.5 Q7 16 12 18.5 Q17 21 22 18.5 L22 22 L2 22 Z" fill="#4a90c2"/>
+  <rect x="6.2" y="11.5" width="2.4" height="7" fill="#6b5439"/>
+  <rect x="15.4" y="11.5" width="2.4" height="7" fill="#6b5439"/>
+  <rect x="2" y="8.5" width="20" height="3" rx="1" fill="#8a6d4b"/>
+  <rect x="2" y="8.5" width="20" height="1" fill="#a9876048"/>
 </svg>`;
-const SVG_BATEAU = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M4 16 L20 16 L17 20.5 L7 20.5 Z" fill="currentColor" stroke="none"/>
-  <line x1="12" y1="16" x2="12" y2="3.5" />
-  <path d="M12.3 4.5 L18.5 15 L12.3 15 Z" fill="currentColor" stroke="none"/>
+const SVG_BATEAU = `<svg viewBox="0 0 24 24" width="20" height="20">
+  <path d="M3 16 L21 16 L18 20.5 L6 20.5 Z" fill="#8a6d4b"/>
+  <line x1="12" y1="16" x2="12" y2="3.5" stroke="#5c4630" stroke-width="1.4"/>
+  <path d="M12.3 4.3 L18.6 15 L12.3 15 Z" fill="#eee3cf"/>
+  <path d="M11.7 7 L11.7 15 L7 15 Z" fill="#eee3cf" opacity=".85"/>
 </svg>`;
-// Caverne : un monticule rocheux avec une ouverture sombre creusée dedans (remplie en foncé,
-// pas "currentColor", pour bien lire comme un TROU même sur un fond clair) — plus explicite
-// que l'ancien 🕳️ (un simple point noir, trop abstrait pour se voir comme une grotte).
-const SVG_CAVERNE = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round">
-  <path d="M2.5 20.5 Q1.5 10.5 12 8.5 Q22.5 10.5 21.5 20.5 Z" />
-  <path d="M8.5 20.5 Q8.5 12.5 12 12.5 Q15.5 12.5 15.5 20.5 Z" fill="#000000" fill-opacity="0.92" stroke="none"/>
+// Caverne : un monticule rocheux avec une ouverture sombre creusée dedans — plus explicite que
+// l'ancien 🕳️ (un simple point noir, trop abstrait pour se voir comme une grotte).
+const SVG_CAVERNE = `<svg viewBox="0 0 24 24" width="20" height="20">
+  <path d="M2.5 20.5 Q1.5 10.5 12 8.5 Q22.5 10.5 21.5 20.5 Z" fill="#8a8f98"/>
+  <path d="M8.5 20.5 Q8.5 12.5 12 12.5 Q15.5 12.5 15.5 20.5 Z" fill="#1a1410"/>
 </svg>`;
-const SVG_SAC = `<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round">
-  <path d="M9 9.5 L9 6.8 Q9 3.8 12 3.8 Q15 3.8 15 6.8 L15 9.5" />
-  <path d="M6 10 Q6 8.7 7.3 8.5 L16.7 8.5 Q18 8.7 18.2 10 L19.3 19.3 Q19.4 20.7 18 20.7 L6 20.7 Q4.6 20.7 4.7 19.3 Z" />
-  <line x1="9.5" y1="12.5" x2="9" y2="17.5" />
-  <line x1="14.5" y1="12.5" x2="15" y2="17.5" />
+const SVG_SAC = `<svg viewBox="0 0 24 24" width="19" height="19">
+  <path d="M9 9.5 L9 6.8 Q9 3.8 12 3.8 Q15 3.8 15 6.8 L15 9.5" fill="none" stroke="#5c3a1a" stroke-width="1.7" stroke-linecap="round"/>
+  <path d="M6 10 Q6 8.7 7.3 8.5 L16.7 8.5 Q18 8.7 18.2 10 L19.3 19.3 Q19.4 20.7 18 20.7 L6 20.7 Q4.6 20.7 4.7 19.3 Z" fill="#8a5a2b"/>
+  <line x1="9.5" y1="12.5" x2="9" y2="17.5" stroke="#5c3a1a" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="14.5" y1="12.5" x2="15" y2="17.5" stroke="#5c3a1a" stroke-width="1.2" stroke-linecap="round"/>
 </svg>`;
 
 export const SYMBOL_TYPES = [
@@ -52,7 +60,9 @@ export const SYMBOL_TYPES = [
   { key: "tente", icon: "⛺", label: "Tente de camping" },
   { key: "arbre", icon: "🌲", label: "Arbre" },
   { key: "montagne", icon: "⛰️", label: "Montagne" },
-  { key: "maison", icon: "🏚️", label: "Maison médiévale" },
+  // 🏚️ ressemblait à une bâtisse en ruine à l'abandon, pas vraiment "médiévale" — remplacée par
+  // une petite maison à toit pentu/chaume, plus proche d'une chaumière médiévale.
+  { key: "maison", svg: SVG_MAISON, label: "Maison médiévale" },
   // ♜ (tour d'échecs) ressemble bien à une tour de pierre crénelée — bien plus adapté qu'un
   // émoji "tour" moderne (🗼 = tour de télécom/Tokyo Tower).
   { key: "tour", icon: "♜", label: "Tour médiévale" },
