@@ -233,12 +233,25 @@ function wireUpdateCheck() {
         return;
       }
       await reg.update();
+      // Récupère directement sur le serveur (en contournant tout cache) le nom de la version
+      // actuellement publiée, pour que le message affiché à l'utilisateur soit vérifiable
+      // (ex. "rpgmap-cache-v17") plutôt qu'un simple "mise à jour vérifiée" vague — utile pour
+      // confirmer sans ambiguïté que la tablette a bien récupéré la toute dernière version.
+      let versionLabel = "";
+      try {
+        const res = await fetch("service-worker.js", { cache: "no-store" });
+        const text = await res.text();
+        const m = text.match(/CACHE_NAME\s*=\s*"([^"]+)"/);
+        if (m) versionLabel = m[1];
+      } catch (_) { /* pas grave si ça échoue, on affiche juste un message générique */ }
       // laisse une courte fenêtre pour qu'une éventuelle nouvelle version s'installe/active
       // (ce qui déclenchera "controllerchange" et un rechargement automatique de son côté) ;
       // dans tous les cas, on force ensuite un rechargement — avec la politique "no-store" du
       // service worker, ce rechargement seul suffit déjà à garantir des fichiers à jour.
-      setStatus("Mise à jour vérifiée — rechargement de l'app…");
-      setTimeout(() => window.location.reload(), 700);
+      setStatus(versionLabel
+        ? `Dernière version disponible : ${versionLabel} — rechargement de l'app…`
+        : "Mise à jour vérifiée — rechargement de l'app…");
+      setTimeout(() => window.location.reload(), 900);
     } catch (e) {
       console.error(e);
       setStatus("Échec de la vérification (" + e.message + ") — réessaie plus tard.");
