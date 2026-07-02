@@ -4,7 +4,7 @@
 // dans un cercle pour bien distinguer un symbole posé par un joueur de ceux posés par le MJ).
 import { App } from "./state.js";
 import { render } from "./mapview.js";
-import { renderSymbols, getTopSymbolTypes, SYMBOL_TYPES } from "./symbols.js";
+import { renderSymbols, getTopSymbolTypes, SYMBOL_TYPES, symbolGlyphHTML } from "./symbols.js";
 import { gridPickerModal } from "./ui-common.js";
 
 export function initPlayUI() {
@@ -42,7 +42,7 @@ function initPlaySymbolPalette() {
 
   document.getElementById("btn-play-more-symbols").addEventListener("click", async () => {
     const picked = await gridPickerModal("Choisis un symbole à poser", SYMBOL_TYPES, {
-      renderFn: (t) => t.icon,
+      renderFn: (t) => symbolGlyphHTML(t),
       itemClass: "play-style",
     });
     if (picked) armPlaySymbol(picked.key);
@@ -58,7 +58,7 @@ function openPlaySymbolPopup() {
     btn.className = "symbol-swatch play-style";
     btn.dataset.type = t.key;
     btn.title = t.label;
-    btn.textContent = t.icon;
+    btn.innerHTML = symbolGlyphHTML(t);
     btn.classList.toggle("active", App.armedSymbolTypePlay === t.key);
     btn.addEventListener("click", () => armPlaySymbol(t.key));
     grid.appendChild(btn);

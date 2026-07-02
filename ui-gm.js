@@ -3,7 +3,7 @@ import { App, markDirty, resetViewToBounds } from "./state.js";
 import { render, zoomFit, startCropMode, cancelCropMode, getCropRect } from "./mapview.js";
 import { initFogForMap, coverAll, clearAll, onFogChanged } from "./fog.js";
 import {
-  SYMBOL_TYPES, getSelectedSymbol, deleteSelectedSymbol, getTopSymbolTypes,
+  SYMBOL_TYPES, getSelectedSymbol, deleteSelectedSymbol, getTopSymbolTypes, symbolGlyphHTML,
   setSelectedSymbolFogMode, setSelectedSymbolMovable, setSelectedSymbolLabel, renderSymbols,
 } from "./symbols.js";
 import { getSelectedLabel, deleteSelectedLabel, setSelectedLabelLayer, renderLabels } from "./labels.js";
@@ -252,7 +252,7 @@ export function renderSymbolPalette() {
     btn.className = "symbol-swatch";
     btn.dataset.type = t.key;
     btn.title = t.label;
-    btn.textContent = t.icon;
+    btn.innerHTML = symbolGlyphHTML(t);
     btn.classList.toggle("active", App.armedSymbolType === t.key);
     btn.addEventListener("click", () => armSymbol(t.key));
     palette.appendChild(btn);
@@ -264,7 +264,7 @@ function initSymbolesTab() {
 
   document.getElementById("btn-more-symbols").addEventListener("click", async () => {
     const picked = await gridPickerModal("Tous les symboles", SYMBOL_TYPES, {
-      renderFn: (t) => t.icon,
+      renderFn: (t) => symbolGlyphHTML(t),
     });
     if (picked) armSymbol(picked.key);
   });

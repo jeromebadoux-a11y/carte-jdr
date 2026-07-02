@@ -345,6 +345,14 @@ function beginSingleGesture(sx, sy) {
   if (App.mode === "gm" && (App.gmTab === "symboles" || App.gmTab === "labels")) {
     // laisse la sélection se faire via le clic direct sur le pin (géré par symbols.js/labels.js)
   }
+  // Mode Jeu : un tap ailleurs que sur un symbole (donc ici, puisque le clic direct sur un pin
+  // est intercepté avant d'arriver jusqu'ici) désélectionne le symbole actuellement sélectionné
+  // — sans ça, le bouton d'effacement du joueur restait affiché même après avoir touché autre
+  // part sur la carte.
+  if (App.mode === "play" && App.selectedSymbolId) {
+    App.selectedSymbolId = null;
+    renderSymbols();
+  }
   panStart = { sx, sy, cx: App.view.cx, cy: App.view.cy };
 }
 
