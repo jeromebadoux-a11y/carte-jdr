@@ -26,8 +26,8 @@ export async function exportCampaignToFile(campaign) {
     originalImageBlob: undefined,
     mapImageDataURL: await blobToDataURL(campaign.mapImageBlob),
     fogDataURL: await blobToDataURL(campaign.fogBlob),
-    // le fichier d'origine (haute résolution) permet le zoom détaillé après ré-import ;
-    // absent sur les parties créées avant cette fonctionnalité (pas d'erreur, juste dégradé).
+    // le fichier original conservé pour le zoom haute résolution à la demande (voir detail.js) —
+    // sans ça, un export/import perdrait silencieusement la capacité de zoom haute résolution.
     originalImageDataURL: await blobToDataURL(campaign.originalImageBlob),
     _fileFormat: "rpgmap-v1",
   };

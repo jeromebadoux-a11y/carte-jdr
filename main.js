@@ -3,11 +3,11 @@ import { App, resetViewToBounds, doAutosave } from "./state.js";
 import { listCampaignsMeta, getCampaign, saveCampaign, newCampaign, deleteCampaign, uid } from "./db.js";
 import { importCampaignFromFile } from "./fileio.js";
 import { initMapView, renderAll, zoomBy, zoomFit } from "./mapview.js";
-import { resetDetailState } from "./detail.js";
 import { initFogForMap, loadFogFromBlob } from "./fog.js";
 import { loadMapImageFromBlob } from "./mapload.js";
-import { initGmUI, refreshRegionsList, updateMapInfo } from "./ui-gm.js";
+import { initGmUI, refreshRegionsList, updateMapInfo, renderSymbolPalette } from "./ui-gm.js";
 import { initPlayUI, resetPlaySafety } from "./ui-play.js";
+import { resetDetailState } from "./detail.js";
 import { toast, confirmModal } from "./ui-common.js";
 
 let uiInitialized = false;
@@ -138,6 +138,7 @@ async function openCampaign(id) {
   resetViewToBounds();
   App.syncScalePanel?.();
   refreshRegionsList();
+  renderSymbolPalette(); // reconstruit le "top 10" selon l'usage propre à CETTE partie
   renderAll();
 }
 

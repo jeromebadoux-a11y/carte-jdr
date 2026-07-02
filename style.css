@@ -42,9 +42,9 @@ button, input, select, textarea{ font-family: inherit; color: inherit; }
 .subtitle{ color:var(--text-dim); margin-top:0; }
 .campaigns-actions{ display:flex; gap:12px; flex-wrap:wrap; margin:20px 0 28px; }
 .campaigns-list{ display:flex; flex-direction:column; gap:10px; }
+.btn-check-updates{ margin-top:22px; }
+.update-status{ color:var(--text-dim); font-size:.85rem; margin:8px 0 0; min-height:1.2em; }
 .empty-hint{ color:var(--text-dim); font-style:italic; }
-.btn-check-updates{ margin-bottom:6px; }
-.update-status{ color:var(--text-dim); font-size:.85rem; margin:0 0 20px; min-height:1.2em; }
 
 .campaign-card{
   display:flex; align-items:center; justify-content:space-between;
@@ -143,6 +143,15 @@ button, input, select, textarea{ font-family: inherit; color: inherit; }
 textarea#label-text-input{
   width:100%; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); padding:8px; margin-bottom:8px; resize:vertical;
 }
+#symbol-label-input{
+  width:100%; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); padding:8px; margin-bottom:8px;
+}
+
+/* fenêtre "tous les symboles" (et popup Mode Jeu) : grille plus dense que le panneau latéral */
+.modal-picker-grid{
+  display:grid; grid-template-columns:repeat(5,1fr); gap:8px; max-height:55vh; overflow-y:auto; margin:10px 0;
+}
+@media (max-width:520px){ .modal-picker-grid{ grid-template-columns:repeat(4,1fr); } }
 
 .regions-list{ display:flex; flex-direction:column; gap:8px; }
 .region-card{
@@ -173,11 +182,22 @@ textarea#label-text-input{
 .symbol-pin .pin-badge{
   position:absolute; top:-4px; right:-4px; font-size:.65rem; background:#05070a; border-radius:50%; padding:1px 3px;
 }
+.symbol-pin .pin-delete{
+  display:none; position:absolute; top:-6px; left:-6px; font-size:.7rem; background:var(--danger); color:#fff;
+  border-radius:50%; width:20px; height:20px; align-items:center; justify-content:center; cursor:pointer;
+  border:2px solid #fff; box-shadow:0 2px 4px rgba(0,0,0,.5);
+}
 .symbol-pin .pin-label{
   margin-top:2px; font-size:.68rem; background:rgba(5,7,10,.75); padding:1px 5px; border-radius:4px; white-space:nowrap;
 }
 .symbol-pin.selected .pin-icon{ box-shadow:0 0 0 3px #fff; }
 .symbol-pin.locked-in-play{ cursor:default; }
+
+/* symbole posé par un joueur en Mode Jeu : rendu noir & blanc dans un cercle pour le distinguer
+   au premier coup d'œil des symboles posés par le MJ (et repérer facilement quoi effacer). */
+.symbol-pin.player-placed .pin-icon{
+  filter:grayscale(1) contrast(1.15); background:#1c1c1c; border-color:#c9c9c9;
+}
 
 .map-label{
   position:absolute; pointer-events:auto; transform: translate(-50%,-50%);
@@ -228,6 +248,28 @@ textarea#label-text-input{
 }
 .fog-lift-btn.active{ background:var(--danger); border-color:#ff9a9a; color:#fff; }
 #app.mode-gm .fog-lift-btn{ display:none !important; }
+
+.play-add-symbol-btn{
+  display:none; position:absolute; right:14px; bottom:18px; z-index:6;
+  background:var(--panel-alt); border:2px solid var(--border); color:var(--text);
+  padding:12px 16px; border-radius:999px; font-size:.85rem; cursor:pointer;
+}
+.play-add-symbol-btn.active{ border-color:var(--accent); color:var(--accent); }
+#app.mode-play .play-add-symbol-btn{ display:block; }
+
+.play-symbol-palette{
+  position:absolute; right:14px; bottom:76px; z-index:6; width:min(300px, 80vw);
+  background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:12px;
+  box-shadow:0 6px 20px rgba(0,0,0,.5);
+}
+#app.mode-gm .play-symbol-palette{ display:none !important; }
+
+/* palette "style joueur" : mêmes symboles que le MJ mais en noir & blanc dans un cercle, pour
+   bien montrer que ce qu'on pose ici sera visuellement distinct des symboles du MJ sur la carte. */
+.symbol-swatch.play-style{
+  border-radius:50%; filter:grayscale(1) contrast(1.15); background:#1c1c1c; border-color:#c9c9c9;
+}
+.symbol-swatch.play-style.active{ border-color:var(--accent); filter:none; }
 
 /* ============ MODAL ============ */
 .modal-overlay{

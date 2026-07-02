@@ -96,18 +96,19 @@ export function newCampaign(name) {
     mapWidth: 0,
     mapHeight: 0,
     mapImageBlob: null,
-    // fichier original importé, conservé tel quel (même s'il est plus grand que mapImageBlob)
-    // pour permettre un découpage à la demande en haute résolution lors d'un zoom/recadrage
-    // (voir detail.js). Peut être absent sur d'anciennes parties créées avant cette fonctionnalité.
-    originalImageBlob: null,
     mapOriginalWidth: 0,
     mapOriginalHeight: 0,
+    mapCappedByDevice: false,
+    // fichier original conservé tel quel (si la carte a été réduite à l'import) pour permettre
+    // le zoom haute résolution à la demande sur une petite zone — voir detail.js.
+    originalImageBlob: null,
     fogWidth: 0,
     fogHeight: 0,
     fogScale: 0.5,
     fogBlob: null,
     symbols: [],
     labels: [],
+    symbolUsage: {}, // { [typeKey]: nombre de fois posé } — sert à afficher les symboles les plus utilisés en premier
     regions: [],
     activeRegionId: null,
     scaleBar: {

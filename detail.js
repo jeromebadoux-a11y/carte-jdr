@@ -13,7 +13,7 @@
 // par-dessus la vue d'ensemble. Cette vignette reste elle aussi plafonnée à une taille sûre
 // pour le GPU, mais comme elle ne couvre qu'une petite zone du monde, sa résolution effective
 // (pixels par unité de carte) est bien plus fine que celle de la vue d'ensemble.
-import { App } from "./state.js";
+import { App, screenToWorld } from "./state.js";
 import { getMaxSafeTextureSize } from "./mapload.js";
 import { toast } from "./ui-common.js";
 
@@ -66,25 +66,17 @@ if (DIAG_TOASTS) {
   }
 }
 
-const ENGAGE_ZOOM = 1.3;     // au-delà, la vue d'ensemble serait agrandie de +30% : on charge du détail
-const DISENGAGE_ZOOM = 1.05; // en dessous, on relâche le détail (hystérésis pour éviter les allers-retours)
-const MARGIN_FACTOR = 0.4;   // marge autour du viewport visible, en fraction de sa taille (pan sans recharger)
-const THROTTLE_MS = 250;     // fréquence max de vérification pendant un geste en cours
+const ENGAGE_ZOOM = 1.3;      // zoom (monde -> CSS px) au-delà duquel on charge une vignette détail
+const DISENGAGE_ZOOM = 1.05;  // en dessous, on relâche la vignette et revient à la vue d'ensemble
+const MARGIN_FACTOR = 0.4;    // marge tout autour de la zone visible, pour pouvoir paner un peu sans recharger
+const THROTTLE_MS = 250;      // fréquence max de ré-évaluation pendant un geste continu (pincement tenu…)
 
-// Important : ceci est un THROTTLE (exécution périodique garantie), PAS un debounce.
-// Un debounce classique (retarder tant que des évènements arrivent, n'exécuter qu'au silence)
-// ne fonctionne pas ici : pendant un pincement à deux doigts réellement tenu sur un écran
-// tactile, de minuscules micro-tremblements génèrent un flux quasi continu de pointermove —
-// un debounce ne verrait donc JAMAIS 200ms de silence tant que les doigts restent posés, et la
-// vignette haute résolution ne se chargerait qu'après avoir complètement relâché les doigts
-// (et parfois même pas, selon l'enchaînement des évènements). Avec un throttle, la vérification
-// s'exécute au moins une fois toutes les THROTTLE_MS, y compris PENDANT le geste — la carte
-// s'affine donc progressivement au fur et à mesure qu'on zoome, sans attendre la fin du geste.
-let throttleTimer = null;
-let lastRunAt = 0;
-let evaluating = false; // évite d'empiler plusieurs décodages concurrents (coûteux) si un est déjà en cours
-let requestGen = 0;
+let throttleTimer = null, lastRunAt = 0, evaluating = false, requestGen = 0;
 
+// À appeler après CHAQUE rendu (pan/zoom/recadrage) : décide s'il faut charger/relâcher une
+// vignette détail. Utilise un THROTTLE (pas un debounce) : un debounce ne se déclenche jamais
+// tant que les évènements continuent d'arriver, ce qui le rendait invisible pendant un
+// pincement tenu avec micro-tremblement (le cas réel le plus courant sur tablette).
 export function scheduleDetailUpdate() {
   const now = Date.now();
   const elapsed = now - lastRunAt;
@@ -100,31 +92,44 @@ export function scheduleDetailUpdate() {
   }
 }
 
-// À appeler quand la carte/l'original change (nouvel import, changement de partie) pour ne
-// pas laisser une vignette d'une ancienne carte s'afficher, ni un décodage périmé se terminer
-// plus tard et écraser l'état courant.
+// À appeler quand on change de partie / de carte / de région : une vignette d'une autre carte
+// ne doit jamais s'afficher par erreur, et un décodage encore en vol doit être ignoré à son retour.
 export function resetDetailState() {
   requestGen++;
   if (throttleTimer) { clearTimeout(throttleTimer); throttleTimer = null; }
-  lastRunAt = 0;
-  releaseDetailImage(App.detail);
   App.detail = null;
 }
 
-function releaseDetailImage(detail) {
-  if (detail && detail.image && typeof detail.image.close === "function") {
-    try { detail.image.close(); } catch (e) { /* déjà fermé / pas grave */ }
-  }
+function padRect(visible, factor) {
+  const extra = (factor - 1) / 2;
+  return { x: visible.x - visible.w * extra, y: visible.y - visible.h * extra, w: visible.w * factor, h: visible.h * factor };
+}
+
+// Calcule le rectangle (monde) à décoder en haute résolution : la zone visible + une marge,
+// mais en réduisant automatiquement cette marge si le résultat dépasserait la taille de texture
+// sûre pour le GPU de l'appareil — mieux vaut une marge plus courte (rechargements plus fréquents
+// en pannant) qu'un rendu forcé à rétrécir toute la vignette (donc moins net) inutilement.
+export function computeAdaptivePaddedRect(visible, campaign, safeDim = getMaxSafeTextureSize()) {
+  const mapW = campaign.mapWidth, mapH = campaign.mapHeight;
+  const origW = campaign.mapOriginalWidth || mapW, origH = campaign.mapOriginalHeight || mapH;
+  const desiredFactor = 1 + 2 * MARGIN_FACTOR;
+  if (!mapW || !mapH || !origW || !origH) return padRect(visible, desiredFactor);
+  const scaleX = origW / mapW, scaleY = origH / mapH;
+  const coreOw = visible.w * scaleX, coreOh = visible.h * scaleY;
+  const largestCore = Math.max(coreOw, coreOh);
+  const maxFactor = largestCore > 0 ? safeDim / largestCore : desiredFactor;
+  const actualFactor = Math.max(1, Math.min(desiredFactor, maxFactor));
+  return padRect(visible, actualFactor);
 }
 
 function getVisibleWorldRect() {
   const vp = App.els.viewport;
+  if (!vp) return null;
   const w = vp.clientWidth, h = vp.clientHeight;
-  const halfW = (w / App.view.zoom) / 2, halfH = (h / App.view.zoom) / 2;
-  return {
-    x: App.view.cx - halfW, y: App.view.cy - halfH,
-    w: halfW * 2, h: halfH * 2,
-  };
+  if (!w || !h) return null;
+  const topLeft = screenToWorld(0, 0);
+  const bottomRight = screenToWorld(w, h);
+  return { x: topLeft.x, y: topLeft.y, w: bottomRight.x - topLeft.x, h: bottomRight.y - topLeft.y };
 }
 
 function rectContains(outer, x, y, w, h) {
@@ -133,178 +138,93 @@ function rectContains(outer, x, y, w, h) {
     (x + w) <= outer.x + outer.w + eps && (y + h) <= outer.y + outer.h + eps;
 }
 
-// Ajoute une marge autour du rectangle strictement visible (pour ne pas devoir recharger au
-// moindre petit pan) — MAIS seulement dans la mesure où il reste de la place sous le plafond
-// de texture sûr pour l'appareil. Sans ça, à fort zoom, la marge fixe (MARGIN_FACTOR) pouvait
-// gonfler la zone demandée au point de dépasser la taille sûre, forçant un downscale qui rendait
-// la vignette moins nette que la zone réellement visible ne l'aurait permis — d'où le constat
-// "moins net qu'en zoomant pareil sur l'image d'origine directement". On donne donc la priorité
-// à la netteté de ce qui est réellement à l'écran, quitte à recharger plus souvent en pannant.
-export function computeAdaptivePaddedRect(visible, campaign, safeDim = getMaxSafeTextureSize()) {
-  const mapW = campaign.mapWidth, mapH = campaign.mapHeight;
-  const origW = campaign.mapOriginalWidth || mapW, origH = campaign.mapOriginalHeight || mapH;
-  const desiredFactor = 1 + 2 * MARGIN_FACTOR;
-  if (!mapW || !mapH || !origW || !origH) {
-    // pas assez d'info pour calculer le budget pixel : on retombe sur la marge fixe habituelle
-    return padRect(visible, desiredFactor);
-  }
-  const scaleX = origW / mapW, scaleY = origH / mapH;
-  const coreOw = visible.w * scaleX, coreOh = visible.h * scaleY;
-  const largestCore = Math.max(coreOw, coreOh);
-  // facteur maximal d'agrandissement encore possible sans dépasser le plafond GPU sûr
-  const maxFactor = largestCore > 0 ? safeDim / largestCore : desiredFactor;
-  const actualFactor = Math.max(1, Math.min(desiredFactor, maxFactor));
-  return padRect(visible, actualFactor);
-}
-
-function padRect(visible, factor) {
-  const extra = (factor - 1) / 2;
-  return {
-    x: visible.x - visible.w * extra,
-    y: visible.y - visible.h * extra,
-    w: visible.w * factor,
-    h: visible.h * factor,
-  };
-}
-
 async function evaluateDetailNeed() {
   const c = App.campaign;
-  if (!c || !c.originalImageBlob || !App.mapImage) {
-    if (App.detail) { requestGen++; releaseDetailImage(App.detail); App.detail = null; }
-    return;
-  }
-
-  if (App.view.zoom < DISENGAGE_ZOOM) {
-    if (App.detail) {
-      // annule aussi tout décodage encore en vol (ex : l'utilisateur a dézoomé pendant qu'une
-      // vignette pour un zoom précédent finissait de se charger) pour qu'il ne vienne pas
-      // réafficher une vignette périmée une fois résolu.
-      requestGen++;
-      releaseDetailImage(App.detail);
-      App.detail = null;
-      requestRender();
-    }
-    return;
-  }
-  if (App.view.zoom < ENGAGE_ZOOM) return; // zone intermédiaire : on ne touche pas à l'état actuel
-
+  if (!c || !c.originalImageBlob || !c.mapWidth || !c.mapHeight) return;
   const visible = getVisibleWorldRect();
-  if (App.detail && rectContains(App.detail.rect, visible.x, visible.y, visible.w, visible.h)) {
-    return; // la vignette actuelle couvre déjà largement ce qui est affiché
-  }
+  if (!visible) return;
 
-  // un décodage est déjà en cours (probable pendant un geste tenu, avec le throttle qui
-  // retente toutes les THROTTLE_MS) : on ne relance pas par-dessus, la prochaine passe du
-  // throttle réévaluera la situation une fois celui-ci terminé.
-  if (evaluating) return;
-  evaluating = true;
+  const zoom = App.view.zoom;
+  const hasDetail = !!App.detail;
 
-  const padded = computeAdaptivePaddedRect(visible, c);
-
-  diag(`Détail : chargement (zoom ${App.view.zoom.toFixed(2)})…`);
-  const myGen = ++requestGen;
-  try {
-    const loaded = await loadDetailPatch(padded, c);
-    if (!loaded || myGen !== requestGen) {
-      // requête périmée (une région/carte a changé entre-temps) ou échec : on jette silencieusement
-      if (loaded) releaseDetailImage(loaded);
-      return;
+  // désengagement : si on dézoome sous le seuil bas, on revient à la vue d'ensemble
+  if (zoom < DISENGAGE_ZOOM) {
+    if (hasDetail) {
+      requestGen++; // invalide tout décodage en vol correspondant à l'ancien niveau de zoom
+      App.detail = null;
+      document.dispatchEvent(new CustomEvent("app:detail-ready"));
     }
-    // Chiffres clés pour distinguer un vrai bug (on pourrait faire mieux) d'une limite qui ne
-    // vient ni de mon code ni du GPU, mais du fichier source lui-même :
-    // - "chargé" : ce qu'on affiche réellement.
-    // - "natif idéal" : pixels disponibles dans LE FICHIER D'ORIGINE pour la zone visible —
-    //   au-delà, il n'existe tout simplement pas plus de détail dans la photo/scan importé(e).
-    // - "besoin écran" : pixels que l'ÉCRAN de la tablette doit afficher pour cette même zone
-    //   (largeur du viewport × zoom × densité de pixels réelle de l'écran).
-    // - "plafond GPU" : limite sûre détectée pour cet appareil.
-    // Si "natif idéal" < "besoin écran", même le fichier original tel quel n'a pas assez de
-    // détail pour remplir l'écran à ce niveau de zoom — c'est une limite de la photo/scan
-    // elle-même, pas quelque chose de corrigeable par l'app (il faudrait un fichier source plus
-    // détaillé). Si "natif idéal" ≥ "besoin écran" mais que ça reste flou à l'écran, alors il y a
-    // effectivement encore un bug de rendu à trouver.
-    const origW = c.mapOriginalWidth || c.mapWidth, origH = c.mapOriginalHeight || c.mapHeight;
-    const scaleX = origW / c.mapWidth, scaleY = origH / c.mapHeight;
-    const idealW = Math.round(visible.w * scaleX), idealH = Math.round(visible.h * scaleY);
-    const safeDim = getMaxSafeTextureSize();
-    const realDpr = window.devicePixelRatio || 1;
-    const vp = App.els.viewport;
-    const screenNeedW = Math.round((vp?.clientWidth || 0) * realDpr);
-    const screenNeedH = Math.round((vp?.clientHeight || 0) * realDpr);
-    diag(`Détail : chargé ${loaded.image.width}×${loaded.image.height}px | natif idéal ${idealW}×${idealH}px | besoin écran ${screenNeedW}×${screenNeedH}px | plafond GPU ${safeDim}px`);
-    releaseDetailImage(App.detail);
+    return;
+  }
+  if (zoom < ENGAGE_ZOOM) return; // zone "morte" entre les deux seuils : ne change rien (évite un battement)
+
+  // si la vignette déjà chargée couvre encore entièrement la zone visible, rien à refaire
+  if (hasDetail && rectContains(App.detail.rect, visible.x, visible.y, visible.w, visible.h)) return;
+
+  if (evaluating) return; // un décodage est déjà en cours ; le prochain throttle réessaiera
+  evaluating = true;
+  const myGen = requestGen;
+  try {
+    const paddedRect = computeAdaptivePaddedRect(visible, c);
+    const loaded = await loadDetailPatch(paddedRect, c);
+    if (!loaded || myGen !== requestGen) return; // périmé : dézoomé/changé de carte entre-temps
     App.detail = loaded;
-    requestRender();
+    document.dispatchEvent(new CustomEvent("app:detail-ready"));
+
+    if (DIAG_TOASTS) {
+      const origW = c.mapOriginalWidth || c.mapWidth, origH = c.mapOriginalHeight || c.mapHeight;
+      const scaleX = origW / c.mapWidth, scaleY = origH / c.mapHeight;
+      const idealW = Math.round(visible.w * scaleX), idealH = Math.round(visible.h * scaleY);
+      const safeDim = getMaxSafeTextureSize();
+      const realDpr = window.devicePixelRatio || 1;
+      const vp = App.els.viewport;
+      const screenNeedW = Math.round((vp?.clientWidth || 0) * realDpr);
+      const screenNeedH = Math.round((vp?.clientHeight || 0) * realDpr);
+      diag(`Détail : chargé ${loaded.image.width}×${loaded.image.height}px | natif idéal ${idealW}×${idealH}px | besoin écran ${screenNeedW}×${screenNeedH}px | plafond GPU ${safeDim}px`);
+    }
+  } catch (e) {
+    console.error("Échec chargement détail :", e);
   } finally {
     evaluating = false;
   }
 }
 
+// Découpe UNIQUEMENT le rectangle demandé dans le fichier original (jamais l'image entière),
+// borné aux limites réelles de la carte, avec un garde-fou de sécurité GPU en sortie.
 async function loadDetailPatch(worldRect, campaign) {
-  if (typeof createImageBitmap !== "function") {
-    diag("Détail : indisponible — ce navigateur ne supporte pas le découpage d'image nécessaire");
-    return null;
-  }
+  const origW = campaign.mapOriginalWidth || campaign.mapWidth;
+  const origH = campaign.mapOriginalHeight || campaign.mapHeight;
+  const scaleX = origW / campaign.mapWidth, scaleY = origH / campaign.mapHeight;
 
-  const mapW = campaign.mapWidth, mapH = campaign.mapHeight;
-  const origW = campaign.mapOriginalWidth || mapW, origH = campaign.mapOriginalHeight || mapH;
-  if (!mapW || !mapH || !origW || !origH) {
-    diag("Détail : dimensions de carte manquantes, impossible de calculer la zone à découper");
-    return null;
-  }
+  const clampedX = Math.max(0, worldRect.x), clampedY = Math.max(0, worldRect.y);
+  const clampedX2 = Math.min(campaign.mapWidth, worldRect.x + worldRect.w);
+  const clampedY2 = Math.min(campaign.mapHeight, worldRect.y + worldRect.h);
+  const rect = { x: clampedX, y: clampedY, w: Math.max(1, clampedX2 - clampedX), h: Math.max(1, clampedY2 - clampedY) };
+  if (rect.w <= 0 || rect.h <= 0) return null;
 
-  const scaleX = origW / mapW, scaleY = origH / mapH;
-  // Si la vue d'ensemble est déjà à la résolution d'origine (pas de perte à l'import), une
-  // vignette "détail" n'apporterait rien de plus net : on ne décode pas pour rien.
-  if (scaleX <= 1.001 && scaleY <= 1.001) {
-    diag("Détail : inutile ici, la vue d'ensemble est déjà à la résolution d'origine");
-    return null;
-  }
+  const sx = Math.round(rect.x * scaleX), sy = Math.round(rect.y * scaleY);
+  const sw = Math.max(1, Math.round(rect.w * scaleX)), sh = Math.max(1, Math.round(rect.h * scaleY));
+  const clampedSw = Math.min(sw, origW - sx), clampedSh = Math.min(sh, origH - sy);
+  if (clampedSw <= 0 || clampedSh <= 0) return null;
 
-  let ox = worldRect.x * scaleX, oy = worldRect.y * scaleY;
-  let ow = worldRect.w * scaleX, oh = worldRect.h * scaleY;
-  // recadre aux bornes réelles de l'image d'origine
-  const ex = Math.min(origW, ox + ow), ey = Math.min(origH, oy + oh);
-  ox = Math.max(0, ox); oy = Math.max(0, oy);
-  ow = Math.max(1, Math.round(ex - ox)); oh = Math.max(1, Math.round(ey - oy));
-  ox = Math.round(ox); oy = Math.round(oy);
-  if (ow < 1 || oh < 1) {
-    diag("Détail : zone calculée vide (0px), abandon");
-    return null;
-  }
+  let bitmap = await createImageBitmap(campaign.originalImageBlob, sx, sy, clampedSw, clampedSh);
 
-  let bitmap;
-  try {
-    bitmap = await createImageBitmap(campaign.originalImageBlob, ox, oy, ow, oh);
-  } catch (e) {
-    console.warn("Découpe haute résolution impossible :", e);
-    diag("Détail : échec du découpage — " + (e && e.message ? e.message : String(e)));
-    return null;
-  }
-
-  // la vignette obtenue doit elle aussi rester dans les clous du GPU de l'appareil
+  // garde-fou : si le patch dépasse la taille de texture sûre pour ce GPU (marge large sur un
+  // petit écran, par ex.), on le réduit — mieux vaut une vignette un peu moins "native" que de
+  // risquer une texture qui échoue/corrompt le rendu sur cet appareil.
   const safeDim = getMaxSafeTextureSize();
-  let image = bitmap;
-  const largest = Math.max(bitmap.width, bitmap.height);
-  if (largest > safeDim) {
-    const scale = safeDim / largest;
-    const cw = Math.max(1, Math.round(bitmap.width * scale));
-    const ch = Math.max(1, Math.round(bitmap.height * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = cw; canvas.height = ch;
-    const cctx = canvas.getContext("2d");
-    cctx.drawImage(bitmap, 0, 0, cw, ch);
+  if (bitmap.width > safeDim || bitmap.height > safeDim) {
+    const ratio = Math.min(safeDim / bitmap.width, safeDim / bitmap.height);
+    const nw = Math.max(1, Math.round(bitmap.width * ratio)), nh = Math.max(1, Math.round(bitmap.height * ratio));
+    const c2 = document.createElement("canvas");
+    c2.width = nw; c2.height = nh;
+    const cctx = c2.getContext("2d");
+    cctx.imageSmoothingEnabled = true;
+    cctx.imageSmoothingQuality = "high";
+    cctx.drawImage(bitmap, 0, 0, nw, nh);
     bitmap.close?.();
-    image = canvas;
+    bitmap = await createImageBitmap(c2);
   }
 
-  // rectangle "monde" réellement couvert (après recadrage aux bornes de l'image d'origine)
-  const rect = { x: ox / scaleX, y: oy / scaleY, w: ow / scaleX, h: oh / scaleY };
-  return { image, rect };
-}
-
-// évite une dépendance circulaire avec mapview.js : on déclenche juste un ré-affichage léger
-// (la vignette est déjà posée dans App.detail, mapview.js lira son état au prochain render()).
-function requestRender() {
-  document.dispatchEvent(new CustomEvent("app:detail-ready"));
+  return { image: bitmap, rect };
 }

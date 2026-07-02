@@ -32,6 +32,34 @@ export function promptModal(title, { placeholder = "", initial = "", okLabel = "
   });
 }
 
+// Modale générique "grille de choix" (ex. la liste complète des symboles) : affiche une carte
+// cliquable par élément (rendu personnalisable via renderFn), résout avec l'élément choisi ou
+// null si l'utilisateur ferme sans choisir. Réutilisée par le panneau MJ ET le Mode Jeu.
+export function gridPickerModal(title, items, { renderFn, itemClass = "" } = {}) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("modal-overlay");
+    const box = document.getElementById("modal-box");
+    box.innerHTML = `
+      <h3>${escapeHtml(title)}</h3>
+      <div class="modal-picker-grid" id="modal-picker-grid"></div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="modal-cancel">Fermer</button>
+      </div>`;
+    overlay.classList.remove("hidden");
+    const grid = box.querySelector("#modal-picker-grid");
+    const close = (val) => { overlay.classList.add("hidden"); resolve(val); };
+    items.forEach((item) => {
+      const btn = document.createElement("div");
+      btn.className = "symbol-swatch modal-picker-item" + (itemClass ? " " + itemClass : "");
+      btn.title = item.label || "";
+      btn.innerHTML = renderFn ? renderFn(item) : escapeHtml(String(item));
+      btn.addEventListener("click", () => close(item));
+      grid.appendChild(btn);
+    });
+    box.querySelector("#modal-cancel").onclick = () => close(null);
+  });
+}
+
 export function confirmModal(title, message) {
   return new Promise((resolve) => {
     const overlay = document.getElementById("modal-overlay");

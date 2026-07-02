@@ -3,13 +3,13 @@ import { App, markDirty, resetViewToBounds } from "./state.js";
 import { render, zoomFit, startCropMode, cancelCropMode, getCropRect } from "./mapview.js";
 import { initFogForMap, coverAll, clearAll, onFogChanged } from "./fog.js";
 import {
-  SYMBOL_TYPES, getSelectedSymbol, deleteSelectedSymbol,
-  setSelectedSymbolFogMode, setSelectedSymbolMovable, renderSymbols,
+  SYMBOL_TYPES, getSelectedSymbol, deleteSelectedSymbol, getTopSymbolTypes,
+  setSelectedSymbolFogMode, setSelectedSymbolMovable, setSelectedSymbolLabel, renderSymbols,
 } from "./symbols.js";
 import { getSelectedLabel, deleteSelectedLabel, setSelectedLabelLayer, renderLabels } from "./labels.js";
 import { createRegionFromRect, setActiveRegion, renameRegion, deleteRegion } from "./regions.js";
 import { updateScaleBar } from "./scalebar.js";
-import { toast, promptModal, confirmModal } from "./ui-common.js";
+import { toast, promptModal, confirmModal, gridPickerModal } from "./ui-common.js";
 import { loadMapImageFromBlob, resizeImageToBlob, MAP_QUALITY_PRESETS } from "./mapload.js";
 import { resetDetailState } from "./detail.js";
 import { exportCampaignToFile } from "./fileio.js";
@@ -27,8 +27,9 @@ export function initGmUI() {
 
   document.addEventListener("app:symbol-selected", refreshSymbolPanel);
   document.addEventListener("app:label-selected", refreshLabelPanel);
+  document.addEventListener("app:symbol-placed", renderSymbolPalette); // l'usage a changé -> réordonne le top 10
   document.addEventListener("app:armed-changed", () => {
-    document.querySelectorAll(".symbol-swatch").forEach((b) => b.classList.toggle("active", b.dataset.type === App.armedSymbolType));
+    document.querySelectorAll(".symbol-swatch[data-type]").forEach((b) => b.classList.toggle("active", b.dataset.type === App.armedSymbolType));
   });
 }
 
@@ -96,18 +97,17 @@ function initCarteTab() {
       const qualityKey = document.getElementById("map-quality").value;
       const maxDim = MAP_QUALITY_PRESETS[qualityKey] ?? MAP_QUALITY_PRESETS.high;
       const { blob, width, height, originalWidth, originalHeight, cappedByDevice } = await resizeImageToBlob(file, maxDim);
-      resetDetailState(); // une nouvelle carte invalide toute vignette haute résolution de l'ancienne
+      resetDetailState(); // une vignette haute résolution de l'ancienne carte ne doit jamais s'afficher ici
       App.campaign.mapImageBlob = blob;
       App.campaign.mapWidth = width;
       App.campaign.mapHeight = height;
       App.campaign.mapOriginalWidth = originalWidth;
       App.campaign.mapOriginalHeight = originalHeight;
       App.campaign.mapCappedByDevice = cappedByDevice;
-      // Conserve le fichier importé tel quel (même s'il est réduit pour l'affichage d'ensemble
-      // ci-dessus) afin de pouvoir en découper des portions en pleine résolution plus tard,
-      // quand le MJ zoome fort ou recadre une région (voir detail.js). Inutile de le garder
-      // en double si l'image d'ensemble est déjà à la résolution native (rien à gagner).
-      App.campaign.originalImageBlob = width < originalWidth || height < originalHeight ? file : null;
+      // on ne conserve le fichier original que s'il a vraiment été réduit à l'import — sinon la
+      // vue d'ensemble EST déjà la résolution native, inutile de garder une seconde copie qui
+      // prendrait de la place pour rien (voir detail.js pour l'usage de ce fichier conservé).
+      App.campaign.originalImageBlob = (width < originalWidth || height < originalHeight) ? file : null;
       App.campaign.regions = [];
       App.campaign.activeRegionId = null;
       await loadMapImageFromBlob(blob);
@@ -189,9 +189,7 @@ export function updateMapInfo() {
   box.classList.remove("hidden");
   const reduced = c.mapOriginalWidth && c.mapOriginalWidth > c.mapWidth;
   const deviceNote = c.mapCappedByDevice ? " — limité par la puce graphique de cet appareil, pas par le réglage choisi" : "";
-  const zoomNote = reduced && c.originalImageBlob
-    ? " · le détail d'origine est automatiquement rechargé en zoomant ou en recadrant une région"
-    : "";
+  const zoomNote = reduced && c.originalImageBlob ? " · le détail d'origine est automatiquement rechargé en zoomant ou en recadrant une région" : "";
   box.textContent = reduced
     ? `Carte : ${c.mapWidth} × ${c.mapHeight} px (réduite depuis l'original ${c.mapOriginalWidth} × ${c.mapOriginalHeight} px${deviceNote})${zoomNote}`
     : `Carte : ${c.mapWidth} × ${c.mapHeight} px (résolution d'origine conservée)`;
@@ -236,21 +234,40 @@ function initBrouillardTab() {
 }
 
 // ---------- Onglet Symboles ----------
-function initSymbolesTab() {
+// Pour ne pas encombrer le panneau (le catalogue compte maintenant plus de 20 symboles), on
+// n'affiche ici que les 10 les plus utilisés dans CETTE partie (voir getTopSymbolTypes), avec
+// un bouton "Plus de symboles…" qui ouvre une fenêtre listant le catalogue complet.
+function armSymbol(type) {
+  App.armedSymbolType = App.armedSymbolType === type ? null : type;
+  App.armedLabel = false;
+  document.dispatchEvent(new CustomEvent("app:armed-changed"));
+}
+
+export function renderSymbolPalette() {
   const palette = document.getElementById("symbol-palette");
-  for (const t of SYMBOL_TYPES) {
+  if (!palette || !App.campaign) return;
+  palette.innerHTML = "";
+  for (const t of getTopSymbolTypes(10)) {
     const btn = document.createElement("div");
     btn.className = "symbol-swatch";
     btn.dataset.type = t.key;
     btn.title = t.label;
     btn.textContent = t.icon;
-    btn.addEventListener("click", () => {
-      App.armedSymbolType = App.armedSymbolType === t.key ? null : t.key;
-      App.armedLabel = false;
-      document.dispatchEvent(new CustomEvent("app:armed-changed"));
-    });
+    btn.classList.toggle("active", App.armedSymbolType === t.key);
+    btn.addEventListener("click", () => armSymbol(t.key));
     palette.appendChild(btn);
   }
+}
+
+function initSymbolesTab() {
+  renderSymbolPalette();
+
+  document.getElementById("btn-more-symbols").addEventListener("click", async () => {
+    const picked = await gridPickerModal("Tous les symboles", SYMBOL_TYPES, {
+      renderFn: (t) => t.icon,
+    });
+    if (picked) armSymbol(picked.key);
+  });
 
   const fogSeg = document.getElementById("symbol-fogmode");
   fogSeg.querySelectorAll(".seg-btn").forEach((b) => {
@@ -262,6 +279,9 @@ function initSymbolesTab() {
 
   document.getElementById("symbol-movable-toggle").addEventListener("change", (ev) => {
     setSelectedSymbolMovable(ev.target.checked);
+  });
+  document.getElementById("symbol-label-input").addEventListener("input", (ev) => {
+    setSelectedSymbolLabel(ev.target.value);
   });
   document.getElementById("btn-delete-symbol").addEventListener("click", async () => {
     if (!getSelectedSymbol()) return;
@@ -275,6 +295,7 @@ function refreshSymbolPanel() {
   const fogSeg = document.getElementById("symbol-fogmode");
   fogSeg.querySelectorAll(".seg-btn").forEach((b) => b.classList.toggle("active", !!sym && sym.fogMode === b.dataset.fogmode));
   document.getElementById("symbol-movable-toggle").checked = !!sym && sym.movableInPlay;
+  document.getElementById("symbol-label-input").value = sym ? (sym.label || "") : "";
 }
 
 // ---------- Onglet Labels ----------

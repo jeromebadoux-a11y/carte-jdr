@@ -5,7 +5,7 @@ import { brushStroke, onFogChanged, getFogPattern } from "./fog.js";
 import { refreshSymbolVisibility, placeSymbolAt, renderSymbols } from "./symbols.js";
 import { refreshLabelVisibility, placeLabelAt, renderLabels } from "./labels.js";
 import { updateScaleBar } from "./scalebar.js";
-import { scheduleDetailUpdate, diag } from "./detail.js";
+import { scheduleDetailUpdate } from "./detail.js";
 
 // dès qu'une vignette haute résolution finit de se charger en arrière-plan, on redessine
 // pour l'afficher (sans quoi il faudrait attendre un prochain pan/zoom pour la voir apparaître).
@@ -34,42 +34,7 @@ export function initMapView() {
   viewport.addEventListener("pointercancel", onPointerUp);
   viewport.addEventListener("pointerleave", onPointerUp);
   viewport.addEventListener("wheel", onWheel, { passive: false });
-
-  watchVisualViewportZoom();
 }
-
-// ============ détection d'un zoom navigateur (page) actif en plus du zoom de l'app ============
-// Hypothèse à vérifier : sur certaines tablettes Android, un réglage d'accessibilité de Chrome
-// ("Forcer l'activation du zoom") permet au pincement à deux doigts de zoomer la PAGE ENTIÈRE
-// (visualViewport.scale > 1) même si la balise <meta viewport> demande user-scalable=no. Si ça
-// se produit pendant qu'on pince pour zoomer dans l'app, notre canvas — déjà rendu bien net à
-// la bonne résolution — se retrouve ENSUITE ré-agrandi par le navigateur comme une simple image
-// étirée, ce qui introduirait un flou qui n'a rien à voir avec la résolution de la carte source.
-// Ça expliquerait : net dans le visualisateur de photos (pas de zoom page actif), moins net dans
-// l'app sur tablette en pinçant (zoom page qui s'ajoute), aucune différence sur PC (pas de
-// pincement tactile déclenchant un zoom page). On ne peut pas désactiver ce réglage depuis le
-// code (c'est un choix utilisateur/accessibilité) mais on peut le détecter et prévenir.
-let vvWarned = false;
-function watchVisualViewportZoom() {
-  const vv = window.visualViewport;
-  if (!vv) return;
-  const check = () => {
-    const scale = vv.scale || 1;
-    if (Math.abs(scale - 1) > 0.02) {
-      if (!vvWarned) {
-        vvWarned = true;
-        diag(`⚠️ Zoom du NAVIGATEUR détecté (échelle page = ${scale.toFixed(2)}) en plus du zoom de l'app — ceci peut rendre l'image floue. Vérifie Chrome ▸ Paramètres ▸ Accessibilité ▸ « Forcer l'activation du zoom » et désactive-le si présent.`);
-      }
-    } else {
-      vvWarned = false;
-    }
-  };
-  vv.addEventListener("resize", check);
-  vv.addEventListener("scroll", check);
-  check();
-}
-
-let lastDiagedRealDpr = null;
 
 function resizeCanvas() {
   // Plafond relevé de 2 à 3 : sur un écran dont la vraie densité de pixels dépasse 2 (fréquent
@@ -78,12 +43,7 @@ function resizeCanvas() {
   // pouvait donner une impression de flou même quand l'image source avait largement assez de
   // détail. Un plafond reste nécessaire pour ne pas exploser la mémoire sur des valeurs
   // aberrantes que certains appareils/réglages d'accessibilité peuvent parfois renvoyer.
-  const realDpr = window.devicePixelRatio || 1;
-  const dpr = Math.min(3, realDpr);
-  if (realDpr !== lastDiagedRealDpr) {
-    lastDiagedRealDpr = realDpr;
-    diag(`Écran : devicePixelRatio réel = ${realDpr}, utilisé pour le rendu = ${dpr}${realDpr > 3 ? " (plafonné)" : ""}`);
-  }
+  const dpr = Math.min(3, window.devicePixelRatio || 1);
   const w = viewport.clientWidth, h = viewport.clientHeight;
   canvas.width = Math.max(1, Math.round(w * dpr));
   canvas.height = Math.max(1, Math.round(h * dpr));
@@ -114,8 +74,8 @@ export function render() {
   const sx = topLeft.x, sy = topLeft.y;
   const sw = bottomRight.x - topLeft.x, sh = bottomRight.y - topLeft.y;
 
-  // (le lissage est décidé finement DANS drawMapLayer, selon qu'on affiche ou non plus d'un
-  // pixel d'écran par pixel source réellement disponible — voir applySmoothingForDensity)
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
   drawMapLayer(ctx, sx, sy, sw, sh, 0, 0, w, h);
   scheduleDetailUpdate();
 
@@ -165,44 +125,17 @@ export function renderAll() {
 // Choisit la meilleure source pour dessiner la zone (sx,sy,sw,sh) [coordonnées "monde"] :
 // la vignette haute résolution (App.detail) si elle couvre entièrement cette zone, sinon la
 // vue d'ensemble. Voir detail.js pour le mécanisme de chargement de la vignette.
-let lastSmoothingDiag = null;
-
 function drawMapLayer(ctx2d, sx, sy, sw, sh, dx, dy, dw, dh) {
-  // Pixels d'écran (device) par unité "monde" (= par pixel de la VUE D'ENSEMBLE, par construction).
-  const dpr = canvas.width / Math.max(1, viewport.clientWidth);
-  const devicePxPerWorld = (dw / sw) * dpr;
-
   const d = App.detail;
   if (d && d.image && d.rect.w > 0 && d.rect.h > 0 && rectContainsWorld(d.rect, sx, sy, sw, sh)) {
     const r = d.rect, img = d.image;
     const scaleX = img.width / r.w, scaleY = img.height / r.h;
     const lsx = (sx - r.x) * scaleX, lsy = (sy - r.y) * scaleY;
     const lsw = sw * scaleX, lsh = sh * scaleY;
-    // pixels d'écran par pixel de la vignette détail (source la plus fine dont on dispose ici)
-    applySmoothingForDensity(ctx2d, devicePxPerWorld / Math.min(scaleX, scaleY), "détail");
     safeDrawImage(ctx2d, img, lsx, lsy, lsw, lsh, dx, dy, dw, dh);
     return;
   }
-  // pas de vignette détail active : la source la plus fine dispo est la vue d'ensemble elle-même
-  applySmoothingForDensity(ctx2d, devicePxPerWorld, "vue d'ensemble");
   safeDrawImage(ctx2d, App.mapImage, sx, sy, sw, sh, dx, dy, dw, dh);
-}
-
-// Testé puis ABANDONNÉ (voir historique) : basculer sur "pixel net" (imageSmoothingEnabled=false,
-// façon plus-proche-voisin) une fois au-delà de la résolution native donnait un résultat PIRE
-// (image visiblement pixelisée) que le lissage — le visualisateur d'images de référence n'utilise
-// clairement pas ce mode-là non plus quand il agrandit au-delà du natif. On reste donc sur un
-// lissage "haute qualité" en permanence ; seule la mesure (px écran par px source dispo) est
-// conservée à titre de diagnostic, sans changer le mode de rendu.
-function applySmoothingForDensity(ctx2d, devicePxPerSourcePx, sourceLabel) {
-  ctx2d.imageSmoothingEnabled = true;
-  ctx2d.imageSmoothingQuality = "high";
-  const oversampling = devicePxPerSourcePx > 1.02;
-  const tag = oversampling ? "au-delà du natif" : "dans la résolution native";
-  if (tag !== lastSmoothingDiag) {
-    lastSmoothingDiag = tag;
-    diag(`Rendu : lissé (haute qualité), ${tag} — source « ${sourceLabel} », ${devicePxPerSourcePx.toFixed(2)} px écran / px source`);
-  }
 }
 
 function rectContainsWorld(outer, x, y, w, h) {
@@ -362,7 +295,11 @@ function updatePinch() {
 // ============ geste 1 doigt : dépend de l'outil actif ============
 function currentSinglePointerTool() {
   if (App.cropMode) return "crop";
-  if (App.mode === "play") return App.fogLiftActive ? "fog-reveal" : "pan";
+  if (App.mode === "play") {
+    // poser un symbole (joueur) a priorité sur "lever le brouillard" si les deux sont armés
+    if (App.armedSymbolTypePlay) return "place-symbol-play";
+    return App.fogLiftActive ? "fog-reveal" : "pan";
+  }
   // mode GM
   if (App.gmTab === "brouillard") return App.fogToolMode === "hide" ? "fog-hide" : "fog-reveal";
   if (App.gmTab === "symboles" && App.armedSymbolType) return "place-symbol";
@@ -392,6 +329,13 @@ function beginSingleGesture(sx, sy) {
   if (tool === "place-label") {
     placeLabelAt(world.x, world.y);
     App.armedLabel = false;
+    document.dispatchEvent(new CustomEvent("app:armed-changed"));
+    render();
+    return;
+  }
+  if (tool === "place-symbol-play") {
+    placeSymbolAt(world.x, world.y, App.armedSymbolTypePlay, { placedByPlayer: true });
+    App.armedSymbolTypePlay = null;
     document.dispatchEvent(new CustomEvent("app:armed-changed"));
     render();
     return;

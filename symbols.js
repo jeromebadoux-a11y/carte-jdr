@@ -15,23 +15,58 @@ export const SYMBOL_TYPES = [
   { key: "ville", icon: "🏰", label: "Ville / Bâtiment" },
   { key: "feu", icon: "🔥", label: "Campement / Feu" },
   { key: "note", icon: "❓", label: "Point d'intérêt" },
+  { key: "croix", icon: "✝️", label: "Croix" },
+  { key: "tente", icon: "⛺", label: "Tente de camping" },
+  { key: "arbre", icon: "🌲", label: "Arbre" },
+  { key: "montagne", icon: "⛰️", label: "Montagne" },
+  { key: "maison", icon: "🏚️", label: "Maison médiévale" },
+  { key: "tour", icon: "🗼", label: "Tour" },
+  { key: "pont", icon: "🌉", label: "Pont" },
+  { key: "bateau", icon: "⛵", label: "Bateau" },
+  { key: "caverne", icon: "🕳️", label: "Entrée de caverne" },
+  { key: "sac", icon: "🎒", label: "Sac à dos" },
 ];
 
 function uidSym() { return "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
-export function placeSymbolAt(x, y, type) {
+// Renvoie le catalogue trié par nombre d'utilisations décroissant (les plus posés en premier),
+// à égalité on garde l'ordre du catalogue — utilisé pour la palette compacte "10 plus utilisés".
+export function getTopSymbolTypes(limit = 10) {
+  const usage = App.campaign?.symbolUsage || {};
+  return SYMBOL_TYPES
+    .map((t, i) => ({ t, i, count: usage[t.key] || 0 }))
+    .sort((a, b) => b.count - a.count || a.i - b.i)
+    .slice(0, limit)
+    .map((e) => e.t);
+}
+
+function recordSymbolUsage(type) {
+  if (!App.campaign) return;
+  if (!App.campaign.symbolUsage) App.campaign.symbolUsage = {};
+  App.campaign.symbolUsage[type] = (App.campaign.symbolUsage[type] || 0) + 1;
+}
+
+// opts.placedByPlayer : posé par un joueur en Mode Jeu (au lieu du MJ) — déplaçable et effaçable
+// par ce joueur, toujours visible (au-dessus du brouillard), affiché en noir & blanc sur la carte
+// pour bien le distinguer des symboles posés par le MJ (voir renderSymbols / style.css).
+export function placeSymbolAt(x, y, type, opts = {}) {
+  const placedByPlayer = !!opts.placedByPlayer;
   const sym = {
     id: uidSym(),
     type,
     x, y,
-    fogMode: "hidden",
-    movableInPlay: false,
+    label: opts.label || "",
+    fogMode: placedByPlayer ? "above" : "hidden",
+    movableInPlay: placedByPlayer ? true : false,
+    placedByPlayer,
   };
   App.campaign.symbols.push(sym);
   App.selectedSymbolId = sym.id;
+  recordSymbolUsage(type);
   markDirty();
   renderSymbols();
   document.dispatchEvent(new CustomEvent("app:symbol-selected", { detail: sym }));
+  document.dispatchEvent(new CustomEvent("app:symbol-placed", { detail: sym }));
   return sym;
 }
 
@@ -64,6 +99,26 @@ export function setSelectedSymbolMovable(val) {
   renderSymbols();
 }
 
+export function setSelectedSymbolLabel(text) {
+  const sym = getSelectedSymbol();
+  if (!sym) return;
+  sym.label = text;
+  markDirty();
+  renderSymbols();
+}
+
+// Un joueur ne peut effacer QUE les symboles qu'il a lui-même posés en Mode Jeu (pas ceux du MJ).
+// Le MJ, lui, peut toujours tout supprimer via l'onglet Symboles (deleteSelectedSymbol), sans
+// cette restriction — voir le bouton 🗑️ qui apparaît directement sur le pin en Mode Jeu.
+export function deleteSymbolIfAllowedInPlay(id) {
+  const sym = App.campaign?.symbols.find((s) => s.id === id);
+  if (!sym || !sym.placedByPlayer) return;
+  App.campaign.symbols = App.campaign.symbols.filter((s) => s.id !== id);
+  if (App.selectedSymbolId === id) App.selectedSymbolId = null;
+  markDirty();
+  renderSymbols();
+}
+
 function typeInfo(type) {
   return SYMBOL_TYPES.find((t) => t.key === type) || SYMBOL_TYPES[0];
 }
@@ -83,19 +138,30 @@ export function renderSymbols() {
       el = document.createElement("div");
       el.className = "symbol-pin";
       el.dataset.id = sym.id;
-      el.innerHTML = `<div class="pin-icon"></div><div class="pin-badge"></div><div class="pin-label"></div>`;
+      el.innerHTML = `<div class="pin-icon"></div><div class="pin-badge"></div><div class="pin-delete">🗑️</div><div class="pin-label"></div>`;
       layer.appendChild(el);
       attachPinDrag(el, sym);
+      el.querySelector(".pin-delete").addEventListener("pointerdown", (ev) => {
+        ev.stopPropagation();
+        deleteSymbolIfAllowedInPlay(sym.id);
+      });
     } else {
       existing.delete(sym.id);
     }
     const info = typeInfo(sym.type);
     el.querySelector(".pin-icon").textContent = info.icon;
     el.querySelector(".pin-badge").textContent = sym.fogMode === "above" ? "👁️" : "🌫️";
-    el.querySelector(".pin-label").textContent = "";
+    el.querySelector(".pin-label").textContent = sym.label || "";
+    el.querySelector(".pin-label").style.display = sym.label ? "block" : "none";
     el.classList.toggle("selected", sym.id === App.selectedSymbolId);
     el.classList.toggle("fogmode-hidden", sym.fogMode !== "above");
     el.classList.toggle("fogmode-above", sym.fogMode === "above");
+    el.classList.toggle("player-placed", !!sym.placedByPlayer);
+
+    // le bouton d'effacement sur le pin lui-même n'a de sens qu'en Mode Jeu, et uniquement pour
+    // un symbole que CE joueur a posé (pas un symbole du MJ) ; le MJ efface via son propre panneau.
+    const showDeleteBadge = App.mode === "play" && sym.placedByPlayer && sym.id === App.selectedSymbolId;
+    el.querySelector(".pin-delete").style.display = showDeleteBadge ? "flex" : "none";
 
     const draggable = App.mode === "gm" || (App.mode === "play" && sym.movableInPlay);
     el.classList.toggle("locked-in-play", App.mode === "play" && !sym.movableInPlay);
