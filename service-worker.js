@@ -1,5 +1,5 @@
 // service-worker.js — mise en cache complète de l'app pour un fonctionnement 100% hors ligne.
-const CACHE_NAME = "rpgmap-cache-v12";
+const CACHE_NAME = "rpgmap-cache-v17";
 const APP_SHELL = [
   "./",
   "./index.html",
